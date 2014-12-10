@@ -21,7 +21,12 @@
 
 #define ADS125X_CHANNEL_0                       0x00u
 #define ADS125X_CHANNEL_1                       0x01u
-#define ADS125X_CHANNEL_2
+#define ADS125X_CHANNEL_2                       0x02u
+#define ADS125X_CHANNEL_3                       0x03u
+#define ADS125X_CHANNEL_4                       0x04u
+#define ADS125X_CHANNEL_5                       0x05u
+#define ADS125X_CHANNEL_6                       0x06u
+#define ADS125X_CHANNEL_7                       0x07u
 #define ADS125X_CHANNEL_AINCOM                  0x08u
 
 #define ADS125X_CMD_WAKEUP                      0x00u
