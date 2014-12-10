@@ -7,6 +7,7 @@
  */
 
 #include <linux/spi/spi.h>
+#include <linux/interrupt.h>
 #include <linux/module.h>
 #include <linux/err.h>
 
@@ -16,11 +17,11 @@
 #include <linux/iio/trigger_consumer.h>
 #include <linux/iio/triggered_buffer.h>
 
-#include "ads1256.h."
+#include "ads1256.h"
 
-static int ti_sd_postenable(struct iio_dev *);
-static int ti_sd_postdisable(struct iio_dev *);
-static int ti_sd_read_data(struct sigma_delta *, uint8_t *);
+static int ti_sd_buffer_postenable(struct iio_dev *);
+static int ti_sd_buffer_postdisable(struct iio_dev *);
+static int ti_sd_read_data(struct ti_sigma_delta *, uint8_t *);
 
 static const struct iio_buffer_setup_ops ti_sd_buffer_setup_ops =
 {
@@ -61,7 +62,7 @@ static irqreturn_t ti_sd_trigger_handler(int irq, void * p)
     sigma_delta->is_irq_dis = false;
     enable_irq(sigma_delta->spi->irq);
 
-    return (IRQ_HANDLER);
+    return (IRQ_HANDLED);
 }
 
 static irqreturn_t ti_sd_trigger_ready_handler(int irq, void * p)
@@ -73,17 +74,19 @@ static irqreturn_t ti_sd_trigger_ready_handler(int irq, void * p)
     complete(&sigma_delta->completion);
     disable_irq_nosync(irq);
     sigma_delta->is_irq_dis = true;
-    iio_trigger_poll(sigma_delta->trig, iio_get_time_ns());
+    iio_trigger_poll(sigma_delta->trigger, iio_get_time_ns());
 
-    return (IRQ_HANDLER);
+    return (IRQ_HANDLED);
 }
 
 static int ti_sd_buffer_postenable(struct iio_dev * indio_dev)
 {
-    struct sigma_delta *        sigma_delta;
+    struct ti_sigma_delta *     sigma_delta;
+    uint32_t                    channel;
     int                         retval;
 
-    retval = iio_triggered_buffer(indio_dev);
+    retval = iio_triggered_buffer_postenable(indio_dev);
+    sigma_delta = iio_device_get_drvdata(indio_dev);
 
     if (retval < 0) {
         return (retval);
@@ -98,10 +101,10 @@ static int ti_sd_buffer_postenable(struct iio_dev * indio_dev)
     }
     spi_bus_lock(sigma_delta->spi->master);
     sigma_delta->is_bus_locked = true;
-    retval  = ti_sd_set_mode(sigma_delta, ADS125x_MODE_CONTINUOUS);
+    retval  = ti_sd_set_mode(sigma_delta, ADS125X_MODE_CONTINUOUS);
 
     if (retval) {
-        goto FAILE_SET_MODE;
+        goto FAIL_SET_MODE;
     }
     sigma_delta->is_irq_dis = false;
     enable_irq(sigma_delta->spi->irq);
@@ -113,7 +116,7 @@ FAIL_SET_MODE:
 
 FAIL_SET_CHANNEL:
     
-    return (ret);
+    return (retval);
 }
 
 static int ti_sd_buffer_postdisable(struct iio_dev * indio_dev)
@@ -133,7 +136,7 @@ static int ti_sd_buffer_postdisable(struct iio_dev * indio_dev)
         disable_irq_nosync(sigma_delta->spi->irq);
         sigma_delta->is_irq_dis = true;
     }
-    retval = ti_sd_set_mode(sigma_delta, ADS125x_MODE_IDLE);
+    retval = ti_sd_set_mode(sigma_delta, ADS125X_MODE_IDLE);
 
     if (retval) {
         goto FAIL_SET_MODE;
@@ -165,7 +168,7 @@ static int ti_sd_probe_trigger(struct iio_dev * indio_dev)
 
         goto FAIL_TRIGG_ALLOC;
     }
-    sigma_delta->trig->ops = &ti_sd_trigger_ops;
+    sigma_delta->trigger->ops = &ti_sd_trigger_ops;
     init_completion(&sigma_delta->completion);
     retval = request_irq(sigma_delta->spi->irq, &ti_sd_trigger_ready_handler,
             IRQF_TRIGGER_LOW, indio_dev->name, sigma_delta);
@@ -195,7 +198,7 @@ FAIL_IRQ_REQUEST:
     iio_trigger_free(sigma_delta->trigger);
 FAIL_TRIGG_ALLOC:
 
-    return (ret);
+    return (retval);
 }
 
 static int ti_sd_read_data(struct ti_sigma_delta * sigma_delta, uint8_t * val)
@@ -205,7 +208,7 @@ static int ti_sd_read_data(struct ti_sigma_delta * sigma_delta, uint8_t * val)
     struct spi_transfer         transfer;
     struct spi_message          message;
 
-    memset(transfer, 0, sizeof(transfer));
+    memset(&transfer, 0, sizeof(transfer));
     transfer_data       = sigma_delta->transfer_data;
     transfer.rx_buf     = transfer_data;
     transfer.len        = 3;                       /* Samples are 24 bit wide */
@@ -231,7 +234,7 @@ static int ti_sd_read_data(struct ti_sigma_delta * sigma_delta, uint8_t * val)
  * @indio_dev: IIO device
  * @spi: SPI device
  */
-void ti_sd_init_sigma_delta(struct sigma_delta * sigma_delta, 
+void ti_sd_init_sigma_delta(struct ti_sigma_delta * sigma_delta, 
         struct iio_dev * indio_dev, struct spi_device * spi)
 {
     sigma_delta->spi = spi;
@@ -247,7 +250,7 @@ int ti_sd_setup_buffer_and_trigger(struct iio_dev * indio_dev)
     int                         retval;
 
     retval = iio_triggered_buffer_setup(indio_dev, &iio_pollfunc_store_time,
-            &ti_st_trigger_handler, &ti_sd_buffer_setup_ops);
+            &ti_sd_trigger_handler, &ti_sd_buffer_setup_ops);
 
     if (retval) {
         return (retval);
@@ -270,7 +273,7 @@ EXPORT_SYMBOL_GPL(ti_sd_setup_buffer_and_trigger);
  */
 void ti_sd_cleanup_buffer_and_trigger(struct iio_dev * indio_dev)
 {
-    struct sigma_delta *        sigma_delta;
+    struct ti_sigma_delta *     sigma_delta;
 
     sigma_delta = iio_device_get_drvdata(indio_dev);
     iio_trigger_unregister(sigma_delta->trigger);
@@ -298,14 +301,14 @@ int ti_sd_write_reg(struct ti_sigma_delta * sigma_delta, uint32_t reg,
     struct spi_transfer         transfer;
     struct spi_message          message;
 
-    memset(transfer, 0, sizeof(transfer));
+    memset(&transfer, 0, sizeof(transfer));
     transfer_data       = sigma_delta->transfer_data;
     transfer.tx_buf     = transfer_data;
-    transfer.len        = 3;             /* Add for 1st and 2nd command byte */
+    transfer.len        = 3;              /* Add for 1st and 2nd command byte */
     transfer.cs_change  = sigma_delta->is_bus_locked;
 
-    transfer_data[0] = CMD_WREG(reg);                          /* command id */
-    transfer_data[1] = 0;                        /* byte counter, 0 = 1 byte */
+    transfer_data[0] = ADS125X_CMD_WREG(reg);                   /* command id */
+    transfer_data[1] = 0;                         /* byte counter, 0 = 1 byte */
     transfer_data[2] = (uint8_t)val;
     spi_message_init(&message);
     spi_message_add_tail(&transfer, &message);
@@ -354,7 +357,7 @@ EXPORT_SYMBOL_GPL(ti_sd_self_calibrate);
  *
  * Returns 0 on success, an error code otherwise.
  */
-int ti_sd_set_mode(struct sigma_delta * sigma_delta, uint32_t mode)
+int ti_sd_set_mode(struct ti_sigma_delta * sigma_delta, uint32_t mode)
 {
     int                         retval;
     uint32_t                    command;
@@ -373,14 +376,14 @@ int ti_sd_set_mode(struct sigma_delta * sigma_delta, uint32_t mode)
     spi_message_init(&message);
 
     switch (mode) {
-        case ADS125x_MODE_CONTINUOUS:
-            command = CMD_RDATAC; 
+        case ADS125X_MODE_CONTINUOUS:
+            command = ADS125X_CMD_RDATAC; 
             spi_message_add_tail(&transfer[0], &message);
                 /* Get and dump the first measurement */
             spi_message_add_tail(&transfer[1], &message); 
             break;
-        case ADS125x_MODE_IDLE:
-            command = CMD_SDATAC;
+        case ADS125X_MODE_IDLE:
+            command = ADS125X_CMD_SDATAC;
             spi_message_add_tail(&transfer[0], &message);
             break;
         default:
@@ -404,14 +407,14 @@ EXPORT_SYMBOL_GPL(ti_sd_set_mode);
  *
  * Returns 0 on success, an error code otherwise.
  */
-int ti_sd_set_channel(struct sigma_delta * sigma_delta, uint32_t channel)
+int ti_sd_set_channel(struct ti_sigma_delta * sigma_delta, uint32_t channel)
 {
     uint32_t                    reg_val;
     int                         retval;
 
     reg_val = (uint8_t)(channel << 4u) | (uint8_t)(channel & 0x0fu);
 
-    retval = ti_sd_write_reg(sigma_delta, REG_MUX, reg_val);
+    retval = ti_sd_write_reg(sigma_delta, ADS125X_REG_MUX, reg_val);
 
     return (retval);
 }
