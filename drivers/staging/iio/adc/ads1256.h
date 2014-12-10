@@ -51,7 +51,7 @@ struct ti_sigma_delta {
     struct completion           completion;
     struct iio_trigger *        trigger;
     /*
-     * DMA (thus cache coherence maintenance requires the transfer buffers to
+     * DMA (thus cache coherence maintenance) requires the transfer buffers to
      * live in their own cache lines.
      */
     uint8_t                     transfer_data[ADS125X_CONFIG_TRANSFER_SIZE]
