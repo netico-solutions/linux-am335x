@@ -47,8 +47,8 @@ struct iio_trigger;
 struct iio_dev;
 
 struct ti_sigma_delta {
-    struct spi_device *         spi;
     struct completion           completion;
+    struct spi_device *         spi;
     struct iio_trigger *        trigger;
     /*
      * DMA (thus cache coherence maintenance) requires the transfer buffers to
