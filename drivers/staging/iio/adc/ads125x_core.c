@@ -113,7 +113,6 @@ static int ti_sd_buffer_postenable(struct iio_dev * indio_dev)
 
 FAIL_SET_MODE:
     spi_bus_unlock(sigma_delta->spi->master);
-
 FAIL_SET_CHANNEL:
     
     return (retval);
@@ -126,11 +125,8 @@ static int ti_sd_buffer_postdisable(struct iio_dev * indio_dev)
 
     sigma_delta = iio_device_get_drvdata(indio_dev);
 
-    /* Not sure if it is needed */
-#if 0
     INIT_COMPLETION(sigma_delta->completion);
     wait_for_completion_timeout(&sigma_delta->completion, HZ);
-#endif
     
     if (!sigma_delta->is_irq_dis) {
         disable_irq_nosync(sigma_delta->spi->irq);
@@ -234,7 +230,7 @@ static int ti_sd_read_data(struct ti_sigma_delta * sigma_delta, uint8_t * val)
  * @indio_dev: IIO device
  * @spi: SPI device
  */
-void ti_sd_init_sigma_delta(struct ti_sigma_delta * sigma_delta, 
+void ti_sd_init(struct ti_sigma_delta * sigma_delta, 
         struct iio_dev * indio_dev, struct spi_device * spi)
 {
     sigma_delta->spi = spi;
@@ -334,7 +330,32 @@ EXPORT_SYMBOL_GPL(ti_sd_write_reg);
 int ti_sd_read_reg(struct ti_sigma_delta * sigma_delta, uint32_t reg,
     uint32_t * val)
 {
-    return (0);
+    int                         retval;
+    uint8_t *                   transfer_data;
+    struct spi_transfer         transfer[2];
+    struct spi_message          message;
+
+    memset(transfer, 0, sizeof(transfer));
+    transfer_data           = sigma_delta->transfer_data;
+    transfer[0].tx_buf      = transfer_data;
+    transfer[0].len         = 2;                  /* 1st and 2nd command byte */
+    transfer[1].rx_buf      = val;
+    transfer[1].len         = 1;
+    transfer[1].cs_change   = sigma_delta->is_bus_locked;
+
+    transfer_data[0] = ADS125X_CMD_RREG(reg);                   /* command id */
+    transfer_data[1] = 0;                         /* byte counter, 0 = 1 byte */
+    spi_message_init(&message);
+    spi_message_add_tail(&transfer[0], &message);
+    spi_message_add_tail(&transfer[1], &message);
+
+    if (sigma_delta->is_bus_locked) {
+        retval = spi_sync_locked(sigma_delta->spi, &message);
+    } else {
+        retval = spi_sync(sigma_delta->spi, &message);
+    }
+
+    return (retval);
 }
 EXPORT_SYMBOL_GPL(ti_sd_read_reg);
 
@@ -346,7 +367,7 @@ EXPORT_SYMBOL_GPL(ti_sd_read_reg);
  */
 int ti_sd_self_calibrate(struct ti_sigma_delta * sigma_delta)
 {
-    return (0);
+    return (-ENOSYS);
 }
 EXPORT_SYMBOL_GPL(ti_sd_self_calibrate);
 
@@ -365,7 +386,6 @@ int ti_sd_set_mode(struct ti_sigma_delta * sigma_delta, uint32_t mode)
     struct spi_message          message;
 
     memset(transfer, 0, sizeof(transfer));
-
     transfer[0].tx_buf      = &command;
     transfer[0].len         = 1;
     transfer[0].cs_change   = sigma_delta->is_bus_locked;
@@ -421,5 +441,5 @@ int ti_sd_set_channel(struct ti_sigma_delta * sigma_delta, uint32_t channel)
 EXPORT_SYMBOL_GPL(ti_sd_set_channel);
 
 MODULE_AUTHOR("Nenad Radulovic <nenad.b.radulovic@gmail.com>");
-MODULE_DESCRIPTION("Texas Instruments Sigma-Delta ADCs");
+MODULE_DESCRIPTION("Texas Instruments ADS125x ADC core");
 MODULE_LICENSE("GPL v2");

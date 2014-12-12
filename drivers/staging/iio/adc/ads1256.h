@@ -1,3 +1,10 @@
+/*
+ * Texas Instruments AD1256 ADC driver core interface
+ *
+ * Author: Nenad Radulovic <nenad.b.radulovic@gmail.com>
+ *
+ * Licensed under GPL-v2
+ */
 
 #ifndef ADS1256_H_
 #define ADS1256_H_
@@ -71,7 +78,7 @@ struct ti_sigma_delta {
  * @indio_dev: IIO device
  * @spi: SPI device
  */
-void ti_sd_init_sigma_delta(struct ti_sigma_delta * sigma_delta, 
+void ti_sd_init(struct ti_sigma_delta * sigma_delta, 
         struct iio_dev * indio_dev, struct spi_device * spi);
 /**
  * ti_sd_setup_buffer_and_trigger()

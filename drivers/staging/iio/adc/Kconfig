@@ -14,7 +14,7 @@ config ADS1256
       module will be called ads1256.
 
 config ADS125X_CORE
-    tristate "Texas Instruments ADS125x ADC driver"
+    tristate "Texas Instruments ADS125x ADC driver support"
     depends on SPI
     select IIO_BUFFER
     select IIO_TRIGGERED_BUFFER
