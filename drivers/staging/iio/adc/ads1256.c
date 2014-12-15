@@ -48,6 +48,7 @@ static int ads1256_probe(struct spi_device * spi)
         return (-ENOMEM);
     }
     state = iio_priv(indio_dev);
+    state->sd.
     /* Enable SPI power */
     state->regulator = devm_regulator_get(&spi->dev, "refin");
 
