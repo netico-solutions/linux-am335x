@@ -11,6 +11,7 @@
 
 #include <linux/types.h>
 #include <linux/completion.h>
+#include <linux/gpio.h>
 
 #define ADS125X_CONFIG_TRANSFER_SIZE            16
 
@@ -55,13 +56,22 @@
 #define ADS125X_MODE_IDLE                       1
 
 struct spi_device;
-struct iio_trigger;
-struct iio_dev;
 
-struct ti_sigma_delta {
+struct ads1256_platform_data {
+        int                     id;
+        int                     cs_gpio;
+        int                     drdy_gpio;
+};
+
+
+
+struct ads1256_chip {
     struct completion           completion;
     struct spi_device *         spi;
-    struct iio_trigger *        trigger;
+    int                         cs_gpio;
+    int                         drdy_gpio; 
+    int                         id;
+    char                        label[16];
     /*
      * DMA (thus cache coherence maintenance) requires the transfer buffers to
      * live in their own cache lines.
@@ -72,13 +82,15 @@ struct ti_sigma_delta {
     bool                        is_irq_dis;
 };
 
+
+
 /**
  * ti_sd_init_sigma_delta()
  * @sigma_delta: The sigma delta device
  * @indio_dev: IIO device
  * @spi: SPI device
  */
-void ti_sd_init(struct ti_sigma_delta * sigma_delta, 
+void ti_sd_init(struct ads1256_chip * chip, 
         struct iio_dev * indio_dev, struct spi_device * spi);
 /**
  * ti_sd_setup_buffer_and_trigger()
@@ -102,7 +114,7 @@ void ti_sd_cleanup_buffer_and_trigger(struct iio_dev * indio_dev);
  *
  * Returns 0 on success, an error code otherwise
  */
-int ti_sd_write_reg(struct ti_sigma_delta * sigma_delta, uint32_t reg,
+int ti_sd_write_reg(struct ads1256_chip * chip, uint32_t reg,
     uint32_t val);
 
 /**
@@ -113,7 +125,7 @@ int ti_sd_write_reg(struct ti_sigma_delta * sigma_delta, uint32_t reg,
  *
  * Returns 0 on success, an error code otherwise.
  */
-int ti_sd_read_reg(struct ti_sigma_delta * sigma_delta, uint32_t reg,
+int ti_sd_read_reg(struct ads1256_chip * chip, uint32_t reg,
     uint32_t * val);
 
 /**
@@ -122,7 +134,7 @@ int ti_sd_read_reg(struct ti_sigma_delta * sigma_delta, uint32_t reg,
  *
  * Returns 0 on success, an error code otherwise.
  */
-int ti_sd_self_calibrate(struct ti_sigma_delta * sigma_delta);
+int ti_sd_self_calibrate(struct ads1256_chip * chip);
 
 /**
  * ti_sd_set_mode()
@@ -131,7 +143,7 @@ int ti_sd_self_calibrate(struct ti_sigma_delta * sigma_delta);
  *
  * Returns 0 on success, an error code otherwise.
  */
-int ti_sd_set_mode(struct ti_sigma_delta * sigma_delta, uint32_t mode);
+int ti_sd_set_mode(struct ads1256_chip * chip, uint32_t mode);
 
 /**
  * ti_sd_set_channel()
@@ -140,6 +152,6 @@ int ti_sd_set_mode(struct ti_sigma_delta * sigma_delta, uint32_t mode);
  *
  * Returns 0 on success, an error code otherwise.
  */
-int ti_sd_set_channel(struct ti_sigma_delta * sigma_delta, uint32_t channel);
+int ti_sd_set_channel(struct ads1256_chip * chip, uint32_t channel);
 
 #endif /* ADS1256_H_ */
