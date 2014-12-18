@@ -229,7 +229,7 @@ int ti_sd_init_chip(struct ads1256_chip * chip, struct spi_device * spi)
         sprintf(label, ADS125X_NAME "-%d-drdy", chip->id);
         ret = gpio_request_one(chip->drdy_gpio, GPIOF_DIR_IN, label);
 
-        if (ret) {
+        if (ret)
                 dev_err(&spi->dev, "DRDY gpio request failed\n");
 
                 goto fail_drdy_request;
@@ -268,6 +268,8 @@ EXPORT_SYMBOL_GPL(ti_sd_init_chip);
 /**
  * ti_sd_init_hw()
  * @chip: chip device
+ *
+ * Returns 0 on success, an error code otherwise
  */
 int ti_sd_init_hw(struct ads1256_chip * chip)
 {
@@ -310,13 +312,22 @@ EXPORT_SYMBOL_GPL(ti_sd_init_hw);
  */
 int ti_sd_term(struct ads1256_chip * chip)
 {
-        gpio_free(chip->spi->cs_gpio);
+        /* TODO: terminate SPI here */
+        gpio_free(chip->cs_gpio);
+        gpio_free(chip->drdy_gpio);
+        kfree(chip);
 
         return (0);
 }
 EXPORT_SYMBOL_GPL(ti_sd_term);
 
 
+
+void ti_sd_term_hw(struct ads1256_chip * chip)
+{
+        /* TODO: stop and terminate HW here */
+}
+EXPORT_SYMBOL_GPL(ti_sd_term_hw);
 
 /**
  * ti_sd_cleanup_buffer_and_trigger()
@@ -326,7 +337,8 @@ EXPORT_SYMBOL_GPL(ti_sd_term);
  */
 void ti_sd_remove_trigger(struct ads1256_chip * chip)
 {
-        free_irq(chip->spi->irq, chip);
+        disable_irq(gpio_to_irq(chip->drdy_gpio));
+        free_irq(gpio_to_irq(chip->drdy_gpio), chip);
         /* TODO: iio_triggered_buffer_cleanup() */
 }
 EXPORT_SYMBOL_GPL(ti_sd_remove_trigger);
