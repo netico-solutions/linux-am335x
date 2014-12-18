@@ -3,25 +3,6 @@
 #
 menu "Analog to digital converters"
 
-config ADS1256
-    tristate "Texas Instruments ADS1256 ADC driver"
-    depends on ADS125X_CORE
-    help
-      Say yes here to build driver for Texas Instruments ADS1256
-      ADC.
-
-      To compile this driver as a module, choose M here: the 
-      module will be called ads1256.
-
-config ADS125X_CORE
-    tristate "Texas Instruments ADS125x ADC driver support"
-    depends on SPI
-    select IIO_BUFFER
-    select IIO_TRIGGERED_BUFFER
-    help
-      Say yes here to build support for Texas Instruments ADS125x
-      ADCs.
-
 config AD7291
 	tristate "Analog Devices AD7291 ADC driver"
 	depends on I2C

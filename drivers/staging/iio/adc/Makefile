@@ -20,6 +20,4 @@ obj-$(CONFIG_AD7280) += ad7280a.o
 obj-$(CONFIG_LPC32XX_ADC) += lpc32xx_adc.o
 obj-$(CONFIG_MXS_LRADC) += mxs-lradc.o
 obj-$(CONFIG_SPEAR_ADC) += spear_adc.o
-obj-$(CONFIG_ADS125X_CORE) += ads125x_core.o
-obj-$(CONFIG_ADS1256) += ads1256.o
 

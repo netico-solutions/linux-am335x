@@ -10,238 +10,237 @@
 #include <linux/interrupt.h>
 #include <linux/module.h>
 #include <linux/err.h>
-
-#include <linux/iio/iio.h>
-#include <linux/iio/buffer.h>
-#include <linux/iio/trigger.h>
-#include <linux/iio/trigger_consumer.h>
-#include <linux/iio/triggered_buffer.h>
+#include <linux/of_gpio.h>
 
 #include "ads1256.h"
 
+#define SPI_CS_ACTIVE                   0
+#define SPI_CS_INACTIVE                 1
 
+static int start_chip_spi(struct ads1256_chip * chip);
+static void stop_chip_spi(struct ads1256_chip * chip);
+static void message_complete(void * arg);
+static irqreturn_t ti_sd_trigger_ready_handler(int irq, void * p);
+static int ti_sd_buffer_enable(struct ads1256_chip * chip);
+static int ti_sd_buffer_disable(struct ads1256_chip * chip);
+static int ti_sd_read_data(struct ads1256_chip * chip);
 
-
-static irqreturn_t ti_sd_trigger_handler(int irq, void * p)
+static int start_chip_spi(struct ads1256_chip * chip)
 {
-    struct ads1256_chip *     sigma_delta;
-    uint8_t                     data[16];
-    int                         ret;
+        chip->message.complete = message_complete;
+        chip->message.context  = chip;
+        gpio_set_value(chip->cs_gpio, SPI_CS_ACTIVE);
 
-    pf          = p;
-    ret = ti_sd_read_data(chip, &data[0]);
+        return (spi_async_locked(chip->spi, &chip->message));
+}
 
-    if (ret == 0) {
-        iio_push_to_buffers(indio_dev, data);
-        iio_trigger_notify_done(indio_dev->trig);
-    }
-    chip->is_irq_dis = false;
-    enable_irq(chip->spi->irq);
 
-    return (IRQ_HANDLED);
+
+static void stop_chip_spi(struct ads1256_chip * chip)
+{
+        gpio_set_value(chip->cs_gpio, SPI_CS_INACTIVE);
+}
+
+
+
+static void message_complete(void * context)
+{
+        stop_chip_spi((struct ads1256_chip *)context);
 }
 
 
 
 static irqreturn_t ti_sd_trigger_ready_handler(int irq, void * p)
 {
-    struct ads1256_chip *     sigma_delta;
+        struct ads1256_chip *   chip = p;
+        int                     ret;
 
-    sigma_delta   = p;
+        disable_irq_nosync(irq);
+        chip->is_irq_enabled = false;
+        ret = ti_sd_read_data(chip);
+        
+        if (ret == 0) {
+                /* push to buffers */
+        }
+        enable_irq(irq);
 
-    complete(&chip->completion);
-    disable_irq_nosync(irq);
-    chip->is_irq_dis = true;
-    iio_trigger_poll(chip->trigger, iio_get_time_ns());
-
-    return (IRQ_HANDLED);
+        return (IRQ_HANDLED);
 }
 
 
 
-static int ti_sd_buffer_postenable(struct iio_dev * indio_dev)
-{
-    struct ads1256_chip *     sigma_delta;
-    uint32_t                    channel;
-    int                         ret;
-
-    ret = iio_triggered_buffer_postenable(indio_dev);
-    sigma_delta = iio_device_get_drvdata(indio_dev);
-
-    if (ret < 0) {
-        return (ret);
-    }
-    channel = find_first_bit(indio_dev->active_scan_mask, 
-            indio_dev->masklength); 
-    ret  = ti_sd_set_channel(chip, 
-            indio_dev->channels[channel].address);
-
-    if (ret) {
-        goto FAIL_SET_CHANNEL;
-    }
-    spi_bus_lock(chip->spi->master);
-    chip->is_bus_locked = true;
-    ret  = ti_sd_set_mode(chip, ADS125X_MODE_CONTINUOUS);
-
-    if (ret) {
-        goto FAIL_SET_MODE;
-    }
-    chip->is_irq_dis = false;
-    enable_irq(chip->spi->irq);
-
-    return (0);
-
-FAIL_SET_MODE:
-    spi_bus_unlock(chip->spi->master);
-FAIL_SET_CHANNEL:
-    
-    return (ret);
-}
-
-
-
-static int ti_sd_buffer_postdisable(struct iio_dev * indio_dev)
-{
-    struct ads1256_chip *     sigma_delta;
-    int                         ret;
-
-    sigma_delta = iio_device_get_drvdata(indio_dev);
-
-    INIT_COMPLETION(chip->completion);
-    wait_for_completion_timeout(&chip->completion, HZ);
-    
-    if (!chip->is_irq_dis) {
-        disable_irq_nosync(chip->spi->irq);
-        chip->is_irq_dis = true;
-    }
-    ret = ti_sd_set_mode(chip, ADS125X_MODE_IDLE);
-
-    if (ret) {
-        goto FAIL_SET_MODE;
-    }
-    ret = spi_bus_unlock(chip->spi->master);
-    chip->is_bus_locked = false;
-
-    return (ret);
-
-FAIL_SET_MODE:
-    spi_bus_unlock(chip->spi->master);
-    chip->is_bus_locked = false;
-
-    return (ret);
-}
-
-
-
-static int ti_sd_probe_trigger(struct ads1256_chip * chip)
+static int ti_sd_buffer_enable(struct ads1256_chip * chip)
 {
         int                     ret;
+
+        spi_bus_lock(chip->spi->master);
+        chip->is_bus_locked = true;
+
+        ret = ti_sd_set_mode(chip, ADS125X_MODE_CONTINUOUS);
+
+        if (ret) {
+                goto fail_set_mode;
+        }
+        chip->is_irq_enabled = false;
+        enable_irq(gpio_to_irq(chip->drdy_gpio));
+
+        return (0);
+
+fail_set_mode:
+        spi_bus_unlock(chip->spi->master);
+    
+        return (ret);
+}
+
+
+
+static int ti_sd_buffer_disable(struct ads1256_chip * chip)
+{
+        int                     ret;
+
+        INIT_COMPLETION(chip->completion);
+        wait_for_completion_timeout(&chip->completion, HZ);
+    
+        if (chip->is_irq_enabled) {
+                disable_irq_nosync(chip->spi->irq);
+                chip->is_irq_enabled = false;
+        }
+        ret = ti_sd_set_mode(chip, ADS125X_MODE_IDLE);
+
+        spi_bus_unlock(chip->spi->master);
+        chip->is_bus_locked = false;
+
+        return (ret);
+}
+
+
+
+static int ti_sd_read_data(struct ads1256_chip * chip)
+{
+        memset(&chip->transfer[0], 0, sizeof(chip->transfer));
+        chip->transfer[0].rx_buf = chip->transfer_data;
+        chip->transfer[0].len    = 3;              /* Samples are 24 bit wide */
+
+        spi_message_init(&chip->message);
+        spi_message_add_tail(&chip->transfer[0], &chip->message);
+
+        return (start_chip_spi(chip));
+}
+
+/*--  PUBLIC METHODS  --------------------------------------------------------*/
+
+
+/**
+ * ti_sd_probe_of() - setup chip data from DTS
+ * spi: SPI device
+ *
+ * Returns 0 on success, an error code otherwise
+ */
+int ti_sd_probe_of(struct spi_device * spi)
+{
+        struct device_node *    node = spi->dev.of_node;
+        struct ads1256_chip *   chip = spi_get_drvdata(spi);
+        int                     gpio;
+        u8                      id;
+
+        /* Get device id */
+        if (of_property_read_u8(node, "dev-id", &id)) {
+                dev_err(&spi->dev, "failed to parse device ID property\n");
+
+                return (-EINVAL);
+        }
+        chip->id = id;
+        /* DRDY gpio pin */
+        gpio = of_get_gpio(node, 0);
+
+        if (!gpio_is_valid(gpio)) {
+                dev_err(&spi->dev, "failed to parse DRDY gpio pin property\n");
+
+                return (gpio);
+        }
+        chip->drdy_gpio = gpio;
+        /* CS gpio pin */
+        gpio = of_get_gpio(node, 1);
+
+        if (!gpio_is_valid(gpio)) {
+                dev_err(&spi->dev, "failed to parse CS gpio pin property\n");
+
+                return (gpio);
+        }
+        chip->cs_gpio = gpio;
+
+        return (0);
+}
+EXPORT_SYMBOL_GPL(ti_sd_probe_of);
+
+
+
+/**
+ * ti_sd_probe_trigger()
+ * @chip: chip device
+ *
+ * Returns 0 on success, an error code otherwise
+ */
+int ti_sd_probe_trigger(struct ads1256_chip * chip)
+{
+        int                     ret;
+        char                    label[16];
 
         ret = gpio_to_irq(chip->drdy_gpio);
 
         if (ret < 0) {
                 dev_err(&chip->spi->dev, " trigger setup failed.\n");
 
-                return (ret);
+                goto fail_gpio_irq;
         }
         init_completion(&chip->completion);
-
+        sprintf(label, ADS125X_NAME "-%d-drdy-irq", chip->id);
         ret = request_irq(ret, &ti_sd_trigger_ready_handler,
                 IRQF_TRIGGER_FALLING, label, chip);
 
-    ret = request_irq(chip->spi->irq, &ti_sd_trigger_ready_handler,
-            IRQF_TRIGGER_LOW, indio_dev->name, sigma_delta);
+        if (ret) {
+                goto fail_irq_request;
+        }
 
-    if (ret) {
-        goto FAIL_IRQ_REQUEST;
-    }
+        return (0);
+fail_irq_request:
+        free_irq(gpio_to_irq(chip->drdy_gpio), chip);
+fail_gpio_irq:
 
-    if (!chip->is_irq_dis) {
-        chip->is_irq_dis = true;
-        disable_irq_nosync(chip->spi->irq);
-    }
-    chip->trigger->dev.parent = &chip->spi->dev;
-    iio_trigger_set_drvdata(chip->trigger, sigma_delta);
-    ret = iio_trigger_register(chip->trigger);
-
-    if (ret) {
-        goto FAIL_TRIGGER_REGISTER;
-    }
-    /* select default trigger */
-    indio_dev->trig = chip->trigger;
-
-    return (0);
-FAIL_TRIGGER_REGISTER:
-    free_irq(chip->spi->irq, sigma_delta);
-FAIL_IRQ_REQUEST:
-    iio_trigger_free(chip->trigger);
-FAIL_TRIGG_ALLOC:
-
-    return (ret);
+        return (ret);
 }
-
-
-
-static int ti_sd_read_data(struct ads1256_chip * chip, uint8_t * val)
-{
-    int                         ret;
-    uint8_t *                   transfer_data;
-    struct spi_transfer         transfer;
-    struct spi_message          message;
-
-    memset(&transfer, 0, sizeof(transfer));
-    transfer_data       = chip->transfer_data;
-    transfer.rx_buf     = transfer_data;
-    transfer.len        = 3;                       /* Samples are 24 bit wide */
-    transfer.cs_change  = chip->is_bus_locked;
-
-    spi_message_init(&message);
-    spi_message_add_tail(&transfer, &message);
-
-    if (chip->is_bus_locked) {
-        ret = spi_sync_locked(chip->spi, &message);
-    } else {
-        ret = spi_sync(chip->spi, &message);
-    }
-
-    return (ret);
-}
-
-/*--  PUBLIC METHODS  --------------------------------------------------------*/
+EXPORT_SYMBOL_GPL(ti_sd_probe_trigger);
 
 
 
 /**
- * ti_sd_init_sigma_delta()
- * @sigma_delta: The sigma delta device
- * @indio_dev: IIO device
+ * ti_sd_init()
+ * @chip: chip device
  * @spi: SPI device
+ *
+ * Returns 0 on success, an error code otherwise
  */
-int ti_sd_init(struct ads1256_chip * chip, struct spi_device * spi, 
-                struct ads1256_platform_data * pdata)
+int ti_sd_init_chip(struct ads1256_chip * chip, struct spi_device * spi)
 {
         int                     ret;
+        char                    label[16];
 
-        strcpy(chip->label, "ads1256");
         chip->spi       = spi;
-        chip->cs_gpio   = pdata->cs_gpio;
-        chip->drdy_gpio = pdata->drdy_gpio;
-        chip->id        = pdata->id;
-        sprintf(label, "%s-%d-drdy", chip->label, chip->id);
+        sprintf(label, ADS125X_NAME "-%d-drdy", chip->id);
         ret = gpio_request_one(chip->drdy_gpio, GPIOF_DIR_IN, label);
 
         if (ret) {
-                dev_err(&spi->dev, " DRDY gpio request failed.\n");
+                dev_err(&spi->dev, "DRDY gpio request failed\n");
 
-                return (ret);
+                goto fail_drdy_request;
         }
-        sprintf(label, "%s-%d-cs", chip->label, chip->id);
+        sprintf(label, ADS125X_NAME "-%d-cs", chip->id);
         ret = gpio_request_one(chip->cs_gpio, GPIOF_INIT_HIGH, label);
 
         if (ret) {
-                dev_err(&spi->dev, " CS gpio request failed.\n");
+                dev_err(&spi->dev, "CS gpio request failed\n");
 
-                return (ret);
+                goto fail_cs_request; 
         }
         spi->bits_per_word = 8;
         spi->mode          = SPI_MODE_0;
@@ -249,98 +248,114 @@ int ti_sd_init(struct ads1256_chip * chip, struct spi_device * spi,
         ret = spi_setup(spi);
 
         if (ret) {
-                dev_err(&spi->dev, " SPI setup failed.\n");
+                dev_err(&spi->dev, "SPI setup failed\n");
 
-                return (ret);
+                goto fail_spi_setup; 
         }
 
         return (ret);
+fail_spi_setup:
+        gpio_free(chip->cs_gpio);
+fail_cs_request:
+        gpio_free(chip->drdy_gpio);
+fail_drdy_request:
+        return (ret);
 }
+EXPORT_SYMBOL_GPL(ti_sd_init_chip);
 
 
 
+/**
+ * ti_sd_init_hw()
+ * @chip: chip device
+ */
+int ti_sd_init_hw(struct ads1256_chip * chip)
+{
+        int                     ret;
+
+        ret = ti_sd_write_reg(chip, ADS125X_REG_STATUS, ADS125X_STATUS_ACAL);
+
+        if (ret) {
+                goto fail_write;
+        }
+        ret = ti_sd_write_reg(chip, ADS125X_REG_ADCON,  0);
+
+        if (ret) {
+                goto fail_write;
+        }
+        ret = ti_sd_write_reg(chip, ADS125X_REG_DRATE,  ADS125X_DRATE_10);
+
+        if (ret) {
+                goto fail_write;
+        }
+        ret = ti_sd_write_reg(chip, ADS125X_REG_IO,     0);
+
+        if (ret) {
+                goto fail_write;
+        }
+        ret = ti_sd_set_channel(chip, 2, 3);
+
+fail_write:
+        return (ret);
+}
+EXPORT_SYMBOL_GPL(ti_sd_init_hw);
+
+
+
+/**
+ * ti_sd_term()
+ * @chip: chip device
+ *
+ * Returns 0 on success, an error code otherwise
+ */
 int ti_sd_term(struct ads1256_chip * chip)
 {
         gpio_free(chip->spi->cs_gpio);
-}
-
-/**
- * ti_sd_setup_buffer_and_trigger()
- * @indio_dev - IIO device
- */
-int ti_sd_setup_buffer_and_trigger(struct ads1256_chip * chip)
-{
-        int                         ret;
-
-        /* TODO: setup circular buffer here (iio_triggered_buffer_setupp()) */
-
-        if (ret) {
-                return (ret);
-        }
-        ret = ti_sd_probe_trigger(sigma_delta);
-
-        if (ret) {
-                /* If failed: iio_triggered_buffer_cleanup() */
-
-                return (ret);
-        }
 
         return (0);
 }
-EXPORT_SYMBOL_GPL(ti_sd_setup_buffer_and_trigger);
+EXPORT_SYMBOL_GPL(ti_sd_term);
 
 
 
 /**
  * ti_sd_cleanup_buffer_and_trigger()
- * @indio_dev - IIO device
+ * @chip: chip device
+ *
+ * Returns 0 on success, an error code otherwise
  */
-void ti_sd_cleanup_buffer_and_trigger(struct ads1256_chip * chip)
+void ti_sd_remove_trigger(struct ads1256_chip * chip)
 {
-        free_irq(chip->spi->irq, sigma_delta);
+        free_irq(chip->spi->irq, chip);
         /* TODO: iio_triggered_buffer_cleanup() */
 }
-EXPORT_SYMBOL_GPL(ti_sd_cleanup_buffer_and_trigger);
+EXPORT_SYMBOL_GPL(ti_sd_remove_trigger);
 
 
 
 /**
  * ti_sd_write_reg() - Write a register
  *
- * @sigma_delta: The sigma delta device
+ * @chip: The sigma delta device
  * @reg: Address of the registers
- * @size: Size of the register (1 - 4)
  * @val: Value to write to the register
  *
  * Returns 0 on success, an error code otherwise
  */
-int ti_sd_write_reg(struct ads1256_chip * chip, uint32_t reg,
-        uint32_t val)
+int ti_sd_write_reg(struct ads1256_chip * chip, uint32_t reg, uint32_t val)
 {
-        int                         ret;
-        uint8_t *                   transfer_data;
-        struct spi_transfer         transfer;
-        struct spi_message          message;
+        memset(&chip->transfer[0], 0, sizeof(chip->transfer));
+        chip->transfer[0].tx_buf = chip->transfer_data;
+        chip->transfer[0].len    = 3;     /* Add for 1st and 2nd command byte */
 
-        memset(&transfer, 0, sizeof(transfer));
-        transfer_data       = chip->transfer_data;
-        transfer.tx_buf     = transfer_data;
-        transfer.len        = 3;          /* Add for 1st and 2nd command byte */
-        transfer.cs_change  = chip->is_bus_locked;
+        chip->transfer_data[0]   = ADS125X_CMD_WREG(reg);       /* command id */
+        chip->transfer_data[1]   = 0;              /* byte counter, 0 = 1 reg */
+        chip->transfer_data[2]   = (uint8_t)val;
 
-        transfer_data[0] = ADS125X_CMD_WREG(reg);               /* command id */
-        transfer_data[1] = 0;                     /* byte counter, 0 = 1 byte */
-        transfer_data[2] = (uint8_t)val;
-        spi_message_init(&message);
-        spi_message_add_tail(&transfer, &message);
+        spi_message_init(&chip->message);
+        spi_message_add_tail(&chip->transfer[0], &chip->message);
 
-        if (chip->is_bus_locked) {
-                ret = spi_sync_locked(chip->spi, &message);
-        } else {
-                ret = spi_sync(chip->spi, &message);
-        }
-
-        return (ret);
+        return (start_chip_spi(chip));
 }
 EXPORT_SYMBOL_GPL(ti_sd_write_reg);
 
@@ -348,41 +363,27 @@ EXPORT_SYMBOL_GPL(ti_sd_write_reg);
 
 /**
  * ti_sd_read_reg()
- * @sigma_delta: The sigma delta device
+ * @chip: The sigma delta device
  * @reg: Address of the register
  * @val: Pointer to a buffer
  *
  * Returns 0 on success, an error code otherwise.
  */
-int ti_sd_read_reg(struct ads1256_chip * chip, uint32_t reg,
-    uint32_t * val)
+int ti_sd_read_reg(struct ads1256_chip * chip, uint32_t reg, uint32_t * val)
 {
-    int                         ret;
-    uint8_t *                   transfer_data;
-    struct spi_transfer         transfer[2];
-    struct spi_message          message;
+        memset(&chip->transfer[0], 0, sizeof(chip->transfer));
+        chip->transfer[0].tx_buf = chip->transfer_data;
+        chip->transfer[0].len    = 2;             /* 1st and 2nd command byte */
+        chip->transfer[1].rx_buf = val;
+        chip->transfer[1].len    = 1;
 
-    memset(transfer, 0, sizeof(transfer));
-    transfer_data           = chip->transfer_data;
-    transfer[0].tx_buf      = transfer_data;
-    transfer[0].len         = 2;                  /* 1st and 2nd command byte */
-    transfer[1].rx_buf      = val;
-    transfer[1].len         = 1;
-    transfer[1].cs_change   = chip->is_bus_locked;
+        chip->transfer_data[0]   = ADS125X_CMD_RREG(reg);       /* command id */
+        chip->transfer_data[1]   = 0;             /* byte counter, 0 = 1 byte */
+        spi_message_init(&chip->message);
+        spi_message_add_tail(&chip->transfer[0], &chip->message);
+        spi_message_add_tail(&chip->transfer[1], &chip->message);
 
-    transfer_data[0] = ADS125X_CMD_RREG(reg);                   /* command id */
-    transfer_data[1] = 0;                         /* byte counter, 0 = 1 byte */
-    spi_message_init(&message);
-    spi_message_add_tail(&transfer[0], &message);
-    spi_message_add_tail(&transfer[1], &message);
-
-    if (chip->is_bus_locked) {
-        ret = spi_sync_locked(chip->spi, &message);
-    } else {
-        ret = spi_sync(chip->spi, &message);
-    }
-
-    return (ret);
+        return (start_chip_spi(chip));
 }
 EXPORT_SYMBOL_GPL(ti_sd_read_reg);
 
@@ -390,7 +391,7 @@ EXPORT_SYMBOL_GPL(ti_sd_read_reg);
 
 /**
  * ti_sd_self_calibrate()
- * @sigma_delta: The sigma delta device
+ * @chip: The sigma delta device
  *
  * Returns 0 on success, an error code otherwise.
  */
@@ -404,50 +405,40 @@ EXPORT_SYMBOL_GPL(ti_sd_self_calibrate);
 
 /**
  * ti_sd_set_mode()
- * @sigma_delta: The sigma delta device
+ * @chip: The sigma delta device
  * @mode: Set mode to ADS125x_MODE_CONTINUOUS or ADS125x_MODE_IDLE
  *
  * Returns 0 on success, an error code otherwise.
  */
 int ti_sd_set_mode(struct ads1256_chip * chip, uint32_t mode)
 {
-    int                         ret;
-    uint32_t                    command;
-    struct spi_transfer         transfer[2]; 
-    struct spi_message          message;
+        memset(&chip->transfer[0], 0, sizeof(chip->transfer));
+        chip->transfer[0].tx_buf = chip->transfer_data;
+        chip->transfer[0].len    = 1;
+        chip->transfer[1].rx_buf = chip->transfer_data;
+        chip->transfer[1].len    = 3;
 
-    memset(transfer, 0, sizeof(transfer));
-    transfer[0].tx_buf      = &command;
-    transfer[0].len         = 1;
-    transfer[0].cs_change   = chip->is_bus_locked;
-    transfer[1].rx_buf      = chip->transfer_data;
-    transfer[1].len         = 3;
-    transfer[1].cs_change   = chip->is_bus_locked;
+        spi_message_init(&chip->message);
 
-    spi_message_init(&message);
+        switch (mode) {
+                case ADS125X_MODE_CONTINUOUS:
+                        chip->transfer_data[0] = ADS125X_CMD_RDATAC; 
+                        spi_message_add_tail(&chip->transfer[0], 
+                                             &chip->message);
+                                        /* Get and dump the first measurement */
+                        spi_message_add_tail(&chip->transfer[1], 
+                                             &chip->message); 
+                        break;
+                case ADS125X_MODE_IDLE:
+                        chip->transfer_data[0] = ADS125X_CMD_SDATAC;
+                        spi_message_add_tail(&chip->transfer[0], 
+                                             &chip->message);
+                        break;
+                default:
+                        return (-EINVAL);
+        }
 
-    switch (mode) {
-        case ADS125X_MODE_CONTINUOUS:
-            command = ADS125X_CMD_RDATAC; 
-            spi_message_add_tail(&transfer[0], &message);
-                /* Get and dump the first measurement */
-            spi_message_add_tail(&transfer[1], &message); 
-            break;
-        case ADS125X_MODE_IDLE:
-            command = ADS125X_CMD_SDATAC;
-            spi_message_add_tail(&transfer[0], &message);
-            break;
-        default:
-            return (-EINVAL);
-    }
-
-    if (chip->is_bus_locked) {
-        ret = spi_sync_locked(chip->spi, &message);
-    } else {
-        ret = spi_sync(chip->spi, &message);
-    }
-
-    return (ret);
+        return (start_chip_spi(chip));
 }
 EXPORT_SYMBOL_GPL(ti_sd_set_mode);
 
@@ -455,21 +446,23 @@ EXPORT_SYMBOL_GPL(ti_sd_set_mode);
 
 /**
  * ti_sd_set_channel()
- * @sigma_delta: The sigma delta device
- * @channel: 0 - 7 channel id
+ * @chip: The sigma delta device
+ * @positive: positive input channel
+ * @negative: negative input channel
  *
  * Returns 0 on success, an error code otherwise.
  */
-int ti_sd_set_channel(struct ads1256_chip * chip, uint32_t channel)
+int ti_sd_set_channel(struct ads1256_chip * chip, uint8_t positive, 
+                uint8_t negative)
 {
-    uint32_t                    reg_val;
-    int                         ret;
+        uint32_t                reg_val;
+        int                     ret;
 
-    reg_val = (uint8_t)(channel << 4u) | (uint8_t)(channel & 0x0fu);
+        reg_val = (uint8_t)(positive << 4u) | (uint8_t)(negative & 0x0fu);
 
-    ret = ti_sd_write_reg(chip, ADS125X_REG_MUX, reg_val);
+        ret = ti_sd_write_reg(chip, ADS125X_REG_MUX, reg_val);
 
-    return (ret);
+        return (ret);
 }
 EXPORT_SYMBOL_GPL(ti_sd_set_channel);
 
