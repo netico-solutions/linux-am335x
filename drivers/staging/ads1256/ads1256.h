@@ -12,6 +12,7 @@
 #include <linux/types.h>
 #include <linux/completion.h>
 #include <linux/gpio.h>
+#include <linux/kfifo.h>
 
 #define ADS125X_NAME                            "ads1256"
 #define ADS125X_CONFIG_TRANSFER_SIZE            16
@@ -84,8 +85,11 @@
 
 
 struct ads1256_chip {
-    struct completion           completion;
     struct spi_device *         spi;
+    struct spi_transfer         irq_transfer;
+    struct spi_message          irq_message;
+    struct kfifo                fifo;
+    struct completion           completion;
     struct spi_transfer         transfer[2];
     struct spi_message          message;
     /*
@@ -93,6 +97,8 @@ struct ads1256_chip {
      * live in their own cache lines.
      */
     uint8_t                     transfer_data[ADS125X_CONFIG_TRANSFER_SIZE]
+        ____cacheline_aligned;
+    uint8_t                     irq_data[ADS125X_CONFIG_TRANSFER_SIZE]
         ____cacheline_aligned;
     bool                        is_bus_locked;
     bool                        is_irq_enabled;
@@ -148,7 +154,15 @@ int ti_sd_init_hw(struct ads1256_chip * chip);
  *
  * Returns 0 on success, an error code otherwise
  */
-int ti_sd_term(struct ads1256_chip * chip);
+int ti_sd_term_chip(struct ads1256_chip * chip);
+
+
+
+/**
+ * ti_sd_term_hw()
+ * @chip: chip device
+ */
+void ti_sd_term_hw(struct ads1256_chip * chip);
 
 
 
@@ -193,17 +207,6 @@ int ti_sd_read_reg(struct ads1256_chip * chip, uint32_t reg, uint32_t * val);
  * Returns 0 on success, an error code otherwise.
  */
 int ti_sd_self_calibrate(struct ads1256_chip * chip);
-
-
-
-/**
- * ti_sd_set_mode()
- * @chip: The chip device
- * @mode: Set mode to ADS125X_MODE_CONTINUOUS or ADS125X_MODE_IDLE
- *
- * Returns 0 on success, an error code otherwise.
- */
-int ti_sd_set_mode(struct ads1256_chip * chip, uint32_t mode);
 
 
 

@@ -10,12 +10,21 @@
 #include <linux/module.h>
 #include <linux/device.h>
 #include <linux/slab.h>
+#include <linux/kernel.h>
 
 #include "ads1256.h"
 
 struct ads1256_state {
         struct ads1256_chip     chip;
 };
+
+static struct ads1256_state * state_from_chip(struct ads1256_chip * chip);
+
+static struct ads1256_state * state_from_chip(struct ads1256_chip * chip)
+{
+        return (container_of(chip, struct ads1256_state, chip));
+}
+
 
 
 static int ads1256_probe(struct spi_device * spi)
@@ -79,12 +88,13 @@ static int ads1256_probe(struct spi_device * spi)
         return (ret);
 fail_adc_init:
 fail_trigg_setup:
-        ti_sd_term(chip);
+        ti_sd_term_chip(chip);
 fail_chip_init:
 fail_dts_parse:
 fail_spi_irq:
 fail_of_node:
         kfree(chip);
+        spi_set_drvdata(spi, NULL);
 
         return (ret);
 }
@@ -93,7 +103,22 @@ fail_of_node:
     
 static int ads1256_remove(struct spi_device * spi)
 {
-        return (0);
+        int                     ret;
+        struct ads1256_state *  state;
+        struct ads1256_chip  *  chip = spi_get_drvdata(spi);
+
+        ret = 0;
+
+        if (chip) {
+                state = state_from_chip(chip);
+
+                ti_sd_term_hw(chip);
+                ti_sd_remove_trigger(chip);
+                ti_sd_term_chip(chip);
+                kfree(chip);
+        }
+
+        return (ret);
 }
 
 
