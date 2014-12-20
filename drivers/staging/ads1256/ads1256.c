@@ -11,11 +11,25 @@
 #include <linux/device.h>
 #include <linux/slab.h>
 #include <linux/kernel.h>
+#include <linux/fs.h>
 
 #include "ads1256.h"
 
 struct ads1256_state {
         struct ads1256_chip     chip;
+};
+
+static int ads1256_open(struct inode * inode, struct file * fd);
+static int ads1256_release(struct inode * inode, struct file * fd);
+static int ads1256_ioctl(struct file * fd, unsigned int , unsigned long);
+static ssize_t ads1256_read(struct file * fd, char __user *, size_t, loff_t *);
+
+static const struct file_operations ads1256_fops = {
+        .owner          = THIS_MODULE,
+        .open           = ads1256_open,
+        .releas         = ads1256_release,
+        .unlocked_ioctl = ads1256_ioctl,
+        .read           = ads1256_read,
 };
 
 static struct ads1256_state * state_from_chip(struct ads1256_chip * chip);
@@ -26,6 +40,26 @@ static struct ads1256_state * state_from_chip(struct ads1256_chip * chip)
 }
 
 
+static int ads1256_open(struct inode * inode, struct file * fd)
+{
+        return (0);
+}
+
+static int ads1256_release(struct inode * inode, struct file * fd)
+{
+        return (0);
+}
+
+static int ads1256_ioctl(struct file * fd, unsigned int cmd, unsigned long arg)
+{
+        return (0);
+}
+
+static ssize_t ads1256_read(struct file * fd, char __user * buff, size_t count, 
+                loff_t * off)
+{
+        return (0);
+}
 
 static int ads1256_probe(struct spi_device * spi)
 {
@@ -87,6 +121,7 @@ static int ads1256_probe(struct spi_device * spi)
 
         return (ret);
 fail_adc_init:
+        ti_sd_remove_trigger(chip);
 fail_trigg_setup:
         ti_sd_term_chip(chip);
 fail_chip_init:
@@ -98,8 +133,6 @@ fail_of_node:
 
         return (ret);
 }
-
-
     
 static int ads1256_remove(struct spi_device * spi)
 {
@@ -120,7 +153,6 @@ static int ads1256_remove(struct spi_device * spi)
 
         return (ret);
 }
-
 
 static const struct of_device_id ads1256_of_match[] = {
     {.compatible = "ti,ads1256"},
