@@ -11,78 +11,29 @@
 
 #include <linux/types.h>
 #include <linux/completion.h>
-#include <linux/gpio.h>
-#include <linux/kfifo.h>
+#include <linux/ioctl.h>
+#include <linux/spinlock.h>
 
+/*--  IOCTL  ----------------------------------------------------------------*/
+
+struct ads125x_mux {
+        int                     positive;
+        int                     negative;
+};
+
+#define ADS125X_MAGIC                           'x'
+#define ADS125X_SET_MUX                                                 \
+        _IOW(ADS125X_MAGIC, 100, struct ads125x_mux)
+#define ADS125X_SET_BUF_SIZE                                            \
+        _IOW(ADS125X_MAGIC, 101, int)
+#define ADS125X_SELF_CALIBRATE                  _IO(ADS125X_MAGIC, 102)
+#define ADS125X_START_SAMPLING                  _IO(ADS125X_MAGIC, 115)
+#define ADS125X_STOP_SAMPLING                   _IO(ADS125X_MAGIC, 116)
+
+/*--  Configuration  --------------------------------------------------------*/
 #define ADS125X_NAME                            "ads1256"
-#define ADS125X_CONFIG_TRANSFER_SIZE            16
 #define ADS125X_CONFIG_SUPPORTED_CHIPS          4
 
-#define ADS125X_REG_STATUS                      0x00u
-#define ADS125X_REG_MUX                         0x01u
-#define ADS125X_REG_ADCON                       0x02u
-#define ADS125X_REG_DRATE                       0x03u
-#define ADS125X_REG_IO                          0x04u
-#define ADS125X_REG_OFC0                        0x05u
-#define ADS125X_REG_OFC1                        0x06u
-#define ADS125X_REG_OFC2                        0x07u
-#define ADS125X_REG_FSC0                        0x08u
-#define ADS125X_REG_FSC1                        0x09u
-#define ADS125X_REG_FSC2                        0x0au
-
-#define ADS125X_STATUS_ID_Pos                   (5)
-#define ADS125X_STATUS_ID_Msk                   (0x7u << ADS125X_STATUS_ID_Pos)
-#define ADS125X_STATUS_ORDER                    (0x1u << 3)
-#define ADS125X_STATUS_ACAL                     (0x1u << 2)
-#define ADS125X_STATUS_BUFEN                    (0x1u << 1)
-#define ADS125X_STATUS_DRDY                     (0x1u << 0)
-
-#define ADS125X_MUX_PSEL_Pos                    (4)
-#define ADS125X_MUX_PSEL_Msk                    (0xfu << ADS125X_MUX_PSEL_Pos)
-#define ADS125X_MUX_NSEL_Pos                    (0)
-#define ADS125X_MUX_NSEL_Msk                    (0xfu << ADS125X_MUX_NSEL_Pos)
-
-#define ADS125X_ADCON_CLK_Pos                   (5)
-#define ADS125X_ADCON_CLK_Msk                   (0x3u << ADS125X_ADCON_CLK_Pos)
-#define ADS125X_ADCON_SDCS_Pos                  (3)
-#define ADS125X_ADCON_SDCS_Msk                  (0x3u << ADS125X_ADCON_SDCS_Pos)
-#define ADS125X_ADCON_PGA_Pos                   (0)
-#define ADS125X_ADCON_PGA_Msk                   (0x7u << ADS125X_ADCON_PGA_Pos)
-
-#define ADS125X_GPIO_DIO_Pos                    (0)
-#define ADS125X_GPIO_DIO_Msk                    (0xfu << ADS125X_GPIO_DIO_Pos)
-#define ADS125X_GPIO_DIR_Pos                    (4)
-#define ADS125X_GPIO_DIR_Msk                    (0xfu << ADS125X_GPIO_DIR_Pos)
-
-#define ADS125X_DRATE_10                        (0x23)
-
-#define ADS125X_CHANNEL_0                       0x00u
-#define ADS125X_CHANNEL_1                       0x01u
-#define ADS125X_CHANNEL_2                       0x02u
-#define ADS125X_CHANNEL_3                       0x03u
-#define ADS125X_CHANNEL_4                       0x04u
-#define ADS125X_CHANNEL_5                       0x05u
-#define ADS125X_CHANNEL_6                       0x06u
-#define ADS125X_CHANNEL_7                       0x07u
-#define ADS125X_CHANNEL_AINCOM                  0x08u
-
-#define ADS125X_CMD_WAKEUP                      0x00u
-#define ADS125X_CMD_RDATA                       0x01u
-#define ADS125X_CMD_RDATAC                      0x03u
-#define ADS125X_CMD_SDATAC                      0x0fu
-#define ADS125X_CMD_RREG(reg)                   (0x10 | (reg))
-#define ADS125X_CMD_WREG(reg)                   (0x50 | (reg))
-#define ADS125X_CMD_SELFCAL                     0xf0u
-#define ADS125X_CMD_SELFOCAL                    0xf1u
-#define ADS125X_CMD_SELFFCAL                    0xf2u
-#define ADS125X_CMD_SYSOCAL                     0xf3u
-#define ADS125X_CMD_SYSGCAL                     0xf4u
-#define ADS125X_CMD_SYNC                        0xfcu
-#define ADS125X_CMD_STANDBY                     0xfdu
-#define ADS125X_CMD_RESET                       0xfeu
-
-#define ADS125X_MODE_CONTINUOUS                 0
-#define ADS125X_MODE_IDLE                       1
 
 #define ADS125X_ERR(msg, ...)                                           \
         printk(KERN_ERR "# " ADS125X_NAME ":" msg, ## __VA_ARGS__)
@@ -100,7 +51,7 @@ struct ads125x_chip {
         struct completion       completion;
         struct spi_transfer     irq_transfer;
         struct spi_message      irq_message;
-        uint8_t                 irq_data[ADS125X_CONFIG_TRANSFER_SIZE]
+        uint8_t                 irq_data[16]
                 ____cacheline_aligned;
         bool                    is_irq_enabled;
         int                     id;
@@ -108,17 +59,33 @@ struct ads125x_chip {
         int                     drdy_gpio;
 };
 
-struct ads125x_multi {
-        struct ads125x_chip *   chip[ADS125X_CONFIG_SUPPORTED_CHIPS];
-        struct spi_device *     spi;
-        struct kfifo            fifo;
-        bool                    is_bus_locked;
-        uint32_t                enabled;
+struct ads125x_sample {
+        uint32_t                raw[ADS125X_CONFIG_SUPPORTED_CHIPS];
+        union ads125x_sample_info {
+                uint32_t                completed_chip;
+        }                       info;
 };
 
-struct ads1256_sample {
-        uint32_t                raw[ADS125X_CONFIG_SUPPORTED_CHIPS];
+struct ads125x_ring {
+        spinlock_t              lock;
+        unsigned int            head;
+        unsigned int            tail;
+        unsigned int            mask;
+        unsigned int            free;
+        struct ads125x_sample * buff;
 };
+
+struct ads125x_multi {
+        struct ads125x_chip *   chip[16];
+        struct spi_device *     spi;
+        struct ads125x_ring     ring;
+        struct completion       ring_completion;
+        unsigned int            enabled;
+        unsigned int            completed_sample;
+        struct ads125x_sample   current_sample;
+        bool                    is_bus_locked;
+};
+
 
 
 int ads125x_probe_trigger(struct ads125x_chip * chip);
@@ -138,11 +105,22 @@ struct spi_device * multi_to_spi(const struct ads125x_multi * multi)
         return (multi->spi);
 }
 
-int ads125x_write_reg(struct ads125x_chip * chip, uint32_t reg, uint32_t val);
-int ads125x_read_reg(struct ads125x_chip * chip, uint32_t reg, uint32_t * val);
+static inline
+bool ads125x_multi_is_locked(struct ads125x_multi * multi)
+{
+        return (multi->is_bus_locked);
+}
+int ads125x_multi_lock(struct ads125x_multi* multi);
+int ads125x_multi_unlock(struct ads125x_multi * multi);
+int ads125x_multi_ring_set_size(struct ads125x_multi * multi, unsigned int size);
+int ads125x_multi_ring_timedwait(struct ads125x_multi * multi, 
+                unsigned long timeout);
+
 int ads125x_self_calibrate(struct ads125x_chip * chip);
-int ads125x_set_channel(struct ads125x_chip * chip, uint8_t positive, 
+int ads125x_set_mux(struct ads125x_chip * chip, uint8_t positive, 
                 uint8_t negative);
+int ads125x_buffer_enable(struct ads125x_chip * chip);
+int ads125x_buffer_disable(struct ads125x_chip * chip);
 
 #endif /* ADS1256_H_ */
 

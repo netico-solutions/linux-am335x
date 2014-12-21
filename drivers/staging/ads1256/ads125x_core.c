@@ -16,17 +16,79 @@
 
 #define CONFIG_FIFO_SIZE                1024
 
-#define SPI_CS_ACTIVE                   0
-#define SPI_CS_INACTIVE                 1
+#define ADS125X_REG_STATUS                      0x00u
+#define ADS125X_REG_MUX                         0x01u
+#define ADS125X_REG_ADCON                       0x02u
+#define ADS125X_REG_DRATE                       0x03u
+#define ADS125X_REG_IO                          0x04u
+#define ADS125X_REG_OFC0                        0x05u
+#define ADS125X_REG_OFC1                        0x06u
+#define ADS125X_REG_OFC2                        0x07u
+#define ADS125X_REG_FSC0                        0x08u
+#define ADS125X_REG_FSC1                        0x09u
+#define ADS125X_REG_FSC2                        0x0au
+
+#define ADS125X_STATUS_ID_Pos                   (5)
+#define ADS125X_STATUS_ID_Msk                   (0x7u << ADS125X_STATUS_ID_Pos)
+#define ADS125X_STATUS_ORDER                    (0x1u << 3)
+#define ADS125X_STATUS_ACAL                     (0x1u << 2)
+#define ADS125X_STATUS_BUFEN                    (0x1u << 1)
+#define ADS125X_STATUS_DRDY                     (0x1u << 0)
+
+#define ADS125X_MUX_PSEL_Pos                    (4)
+#define ADS125X_MUX_PSEL_Msk                    (0xfu << ADS125X_MUX_PSEL_Pos)
+#define ADS125X_MUX_NSEL_Pos                    (0)
+#define ADS125X_MUX_NSEL_Msk                    (0xfu << ADS125X_MUX_NSEL_Pos)
+
+#define ADS125X_ADCON_CLK_Pos                   (5)
+#define ADS125X_ADCON_CLK_Msk                   (0x3u << ADS125X_ADCON_CLK_Pos)
+#define ADS125X_ADCON_SDCS_Pos                  (3)
+#define ADS125X_ADCON_SDCS_Msk                  (0x3u << ADS125X_ADCON_SDCS_Pos)
+#define ADS125X_ADCON_PGA_Pos                   (0)
+#define ADS125X_ADCON_PGA_Msk                   (0x7u << ADS125X_ADCON_PGA_Pos)
+
+#define ADS125X_GPIO_DIO_Pos                    (0)
+#define ADS125X_GPIO_DIO_Msk                    (0xfu << ADS125X_GPIO_DIO_Pos)
+#define ADS125X_GPIO_DIR_Pos                    (4)
+#define ADS125X_GPIO_DIR_Msk                    (0xfu << ADS125X_GPIO_DIR_Pos)
+
+#define ADS125X_DRATE_10                        (0x23)
+
+#define ADS125X_CHANNEL_0                       0x00u
+#define ADS125X_CHANNEL_1                       0x01u
+#define ADS125X_CHANNEL_2                       0x02u
+#define ADS125X_CHANNEL_3                       0x03u
+#define ADS125X_CHANNEL_4                       0x04u
+#define ADS125X_CHANNEL_5                       0x05u
+#define ADS125X_CHANNEL_6                       0x06u
+#define ADS125X_CHANNEL_7                       0x07u
+#define ADS125X_CHANNEL_AINCOM                  0x08u
+
+#define ADS125X_CMD_WAKEUP                      0x00u
+#define ADS125X_CMD_RDATA                       0x01u
+#define ADS125X_CMD_RDATAC                      0x03u
+#define ADS125X_CMD_SDATAC                      0x0fu
+#define ADS125X_CMD_RREG(reg)                   (0x10 | (reg))
+#define ADS125X_CMD_WREG(reg)                   (0x50 | (reg))
+#define ADS125X_CMD_SELFCAL                     0xf0u
+#define ADS125X_CMD_SELFOCAL                    0xf1u
+#define ADS125X_CMD_SELFFCAL                    0xf2u
+#define ADS125X_CMD_SYSOCAL                     0xf3u
+#define ADS125X_CMD_SYSGCAL                     0xf4u
+#define ADS125X_CMD_SYNC                        0xfcu
+#define ADS125X_CMD_STANDBY                     0xfdu
+#define ADS125X_CMD_RESET                       0xfeu
+
+#define ADS125X_MODE_CONTINUOUS                 0
+#define ADS125X_MODE_IDLE                       1
+
+#define SPI_CS_ACTIVE                           0
+#define SPI_CS_INACTIVE                         1
 
 
-struct ads125x_sample {
-        uint32_t                raw_value;
-};
+static int ring_init(struct ads125x_ring * ring, unsigned int elements);
 
-static int chip_exchange_message_bl(struct ads125x_chip * chip, 
-                struct spi_message * message);
-static int chip_exchange_message_bu(struct ads125x_chip * chip, 
+static int chip_exchange_blocking(struct ads125x_chip * chip, 
                 struct spi_message * message);
 static irqreturn_t chip_trigger_ready_handler(int irq, void * p);
 static int chip_read_data_begin_al(struct ads125x_chip * chip);
@@ -34,25 +96,107 @@ static void chip_read_data_finish_al(void * arg);
 static int chip_set_mode_bl(struct ads125x_chip * chip, uint32_t mode);
 
 
-static int chip_exchange_message_bl(struct ads125x_chip * chip, 
-                struct spi_message * message)
+
+static int ring_init(struct ads125x_ring * ring, unsigned int elements)
 {
-        int                     ret;
-        gpio_set_value(chip->cs_gpio, SPI_CS_ACTIVE);
-        ret = spi_sync_locked(chip->multi->spi, message);
-        gpio_set_value(chip->cs_gpio, SPI_CS_INACTIVE);
+        unsigned int            buff_size_bytes;
+
+        ring->head = 0;
+        ring->tail = 0;
+        ring->mask = elements - 1;
+        ring->free = elements - 1;
+
+        if (ring->buff) {
+                /* reinitializing */
+                kfree(ring->buff);
+        } else {
+                /* first initialization */
+                spin_lock_init(&ring->lock);
+        }
+        buff_size_bytes = sizeof(*ring->buff) * elements;
+        ring->buff = kzalloc(buff_size_bytes, GFP_KERNEL);
+
+        if (!ring->buff) {
+                return (-ENOMEM);
+        }
+
+        return (0);
+}
+
+
+
+static void ring_lock(struct ads125x_ring * ring, unsigned int * flags)
+{
+        spin_lock_irqsave(&ring->lock, *flags);
+}
+
+
+
+staic void ring_unlock(struct ads125x_ring * ring, unsigned int * flags)
+{
+        spin_lock_irqrestore(&ring->lock, flags);
+}
+
+
+
+static unsigned int ring_occupied(struct ads125x_ring * ring)
+{
+        unsigned int            ret;
+
+        ret = ring->mask - ring->free;
 
         return (ret);
 }
 
 
 
-static int chip_exchange_message_bu(struct ads125x_chip * chip, 
+static struct ads125x_sample * ring_current_item(struct ads125x_ring * ring)
+{
+        return (&ring->buff[ring->tail]);
+}
+
+
+
+static void ring_put_item(struct ads125x_ring * ring)
+{
+        ring->tail++;
+        ring->tail &= ring->mask;
+
+        if (ring->free) {
+                ring->free--;
+        } else {
+                /* overwrite last entry */
+                ring->head++;
+                ring->head &= ring->mask;
+        }
+}
+
+
+
+static struct ads125x_sample * ring_get_item(struct ads125x_ring * ring)
+{
+        struct ads125x_sample * sample;
+
+        sample = &ring->buff[ring->head++];
+        ring->head &= ring->mask;
+        ring->free++;
+
+        return (sample);
+}
+
+
+
+static int chip_exchange_blocking(struct ads125x_chip * chip, 
                 struct spi_message * message)
 {
         int                     ret;
         gpio_set_value(chip->cs_gpio, SPI_CS_ACTIVE);
-        ret = spi_sync(chip->multi->spi, message);
+
+        if (chip->multi->is_bus_locked) {
+                ret = spi_sync_locked(chip->multi->spi, message);
+        } else {
+                ret = spi_sync(chip->multi->spi, message);
+        }
         gpio_set_value(chip->cs_gpio, SPI_CS_INACTIVE);
 
         return (ret);
@@ -136,7 +280,60 @@ static int chip_set_mode_bl(struct ads125x_chip * chip, uint32_t mode)
                         return (-EINVAL);
         }
 
-        return (chip_exchange_message_bl(chip, &message));
+        return (chip_exchange_blocking(chip, &message));
+}
+
+
+
+static int ads125x_write_reg(struct ads125x_chip * chip, uint32_t reg, 
+                uint32_t val)
+{
+        struct spi_transfer     transfer;
+        struct spi_message      message;
+        uint8_t                 tx_buf[8];
+
+        if (chip->multi->is_bus_locked) {
+                return (-EBUSY);;
+        }
+        memset(&transfer, 0, sizeof(transfer));
+        transfer.tx_buf = tx_buf;
+        transfer.len    = 3;     /* Add for 1st and 2nd command byte */
+
+        tx_buf[0] = ADS125X_CMD_WREG(reg);       /* command id */
+        tx_buf[1] = 0;              /* byte counter, 0 = 1 reg */
+        tx_buf[2] = (uint8_t)val;
+
+        spi_message_init(&message);
+        spi_message_add_tail(&transfer, &message);
+
+        return (chip_exchange_blocking(chip, &message));
+}
+
+
+
+static int ads125x_read_reg(struct ads125x_chip * chip, uint32_t reg, 
+                uint32_t * val)
+{
+        struct spi_transfer     transfer[2];
+        struct spi_message      message;
+        uint8_t                 tx_buf[8];
+
+        if (chip->multi->is_bus_locked) {
+                return (-EBUSY);
+        }
+        memset(&transfer[0], 0, sizeof(transfer));
+        transfer[0].tx_buf = tx_buf;
+        transfer[0].len    = 2;             /* 1st and 2nd command byte */
+        transfer[1].rx_buf = val;
+        transfer[1].len    = 1;
+
+        tx_buf[0] = ADS125X_CMD_RREG(reg);       /* command id */
+        tx_buf[1] = 0;             /* byte counter, 0 = 1 byte */
+        spi_message_init(&message);
+        spi_message_add_tail(&transfer[0], &message);
+        spi_message_add_tail(&transfer[1], &message);
+
+        return (chip_exchange_blocking(chip, &message));
 }
 
 /*--  PUBLIC METHODS  --------------------------------------------------------*/
@@ -205,10 +402,10 @@ int ads125x_init_multi(struct ads125x_multi * multi, struct spi_device * spi,
         multi->spi           = spi;
         multi->is_bus_locked = false;
         multi->enabled       = enabled_chip_mask;
+        ret = ads125x_multi_ring_set_size(multi, 100u);
 
-        return (0);
+        return (ret);
 fail_fifo_setup:
-
 fail_spi_setup:
         return (ret);
 }
@@ -294,7 +491,6 @@ int ads125x_init_hw(struct ads125x_chip * chip)
         if (ret) {
                 goto fail_write;
         }
-        ret = ads125x_set_channel(chip, 2, 3);
 
 fail_write:
         return (ret);
@@ -347,79 +543,8 @@ void ads125x_remove_trigger(struct ads125x_chip * chip)
 {
         disable_irq(gpio_to_irq(chip->drdy_gpio));
         free_irq(gpio_to_irq(chip->drdy_gpio), chip);
-        /* TODO: iio_triggered_buffer_cleanup() */
 }
 EXPORT_SYMBOL_GPL(ads125x_remove_trigger);
-
-
-
-/**
- * ads125x_write_reg() - Write a register
- *
- * @chip: The sigma delta device
- * @reg: Address of the registers
- * @val: Value to write to the register
- *
- * Returns 0 on success, an error code otherwise
- */
-int ads125x_write_reg(struct ads125x_chip * chip, uint32_t reg, uint32_t val)
-{
-        struct spi_transfer     transfer;
-        struct spi_message      message;
-        uint8_t                 tx_buf[8];
-
-        if (chip->multi->is_bus_locked) {
-                return (-EBUSY);;
-        }
-        memset(&transfer, 0, sizeof(transfer));
-        transfer.tx_buf = tx_buf;
-        transfer.len    = 3;     /* Add for 1st and 2nd command byte */
-
-        tx_buf[0] = ADS125X_CMD_WREG(reg);       /* command id */
-        tx_buf[1] = 0;              /* byte counter, 0 = 1 reg */
-        tx_buf[2] = (uint8_t)val;
-
-        spi_message_init(&message);
-        spi_message_add_tail(&transfer, &message);
-
-        return (chip_exchange_message_bu(chip, &message));
-}
-EXPORT_SYMBOL_GPL(ads125x_write_reg);
-
-
-
-/**
- * ads125x_read_reg()
- * @chip: The sigma delta device
- * @reg: Address of the register
- * @val: Pointer to a buffer
- *
- * Returns 0 on success, an error code otherwise.
- */
-int ads125x_read_reg(struct ads125x_chip * chip, uint32_t reg, uint32_t * val)
-{
-        struct spi_transfer     transfer[2];
-        struct spi_message      message;
-        uint8_t                 tx_buf[8];
-
-        if (chip->multi->is_bus_locked) {
-                return (-EBUSY);
-        }
-        memset(&transfer[0], 0, sizeof(transfer));
-        transfer[0].tx_buf = tx_buf;
-        transfer[0].len    = 2;             /* 1st and 2nd command byte */
-        transfer[1].rx_buf = val;
-        transfer[1].len    = 1;
-
-        tx_buf[0] = ADS125X_CMD_RREG(reg);       /* command id */
-        tx_buf[1] = 0;             /* byte counter, 0 = 1 byte */
-        spi_message_init(&message);
-        spi_message_add_tail(&transfer[0], &message);
-        spi_message_add_tail(&transfer[1], &message);
-
-        return (chip_exchange_message_bu(chip, &message));
-}
-EXPORT_SYMBOL_GPL(ads125x_read_reg);
 
 
 
@@ -449,7 +574,7 @@ EXPORT_SYMBOL_GPL(ads125x_self_calibrate);
  *
  * Returns 0 on success, an error code otherwise.
  */
-int ads125x_set_channel(struct ads125x_chip * chip, uint8_t positive, 
+int ads125x_set_mux(struct ads125x_chip * chip, uint8_t positive, 
                 uint8_t negative)
 {
         uint32_t                reg_val;
@@ -461,7 +586,79 @@ int ads125x_set_channel(struct ads125x_chip * chip, uint8_t positive,
 
         return (ret);
 }
-EXPORT_SYMBOL_GPL(ads125x_set_channel);
+EXPORT_SYMBOL_GPL(ads125x_set_mux);
+
+
+
+int ads125x_multi_lock(struct ads125x_multi* multi)
+{
+        if (multi->is_bus_locked) {
+                return (-EBUSY);
+        }
+        spi_bus_lock(multi->spi->master);
+        multi->is_bus_locked = true;
+        init_completion(&multi->ring_complete);
+
+        return (0);
+}
+EXPORT_SYMBOL_GPL(ads125x_multi_lock);
+
+
+
+int ads125x_multi_unlock(struct ads125x_multi * multi)
+{
+        if (!multi->is_bus_locked) {
+                return (-EBUSY);
+        }
+        spi_bus_unlock(multi->spi->master);
+        multi->is_bus_locked = false;
+
+        return (0);
+}
+EXPORT_SYMBOL_GPL(ads125x_multi_unlock);
+
+
+
+int ads125x_multi_ring_set_size(struct ads125x_multi * multi, unsigned int size)
+{
+        void *                  ring_buf;
+        unsigned int            n_of_elements;
+
+        if (!multi->is_bus_locked) {
+                return (-EBUSY);
+        }
+
+        if (multi->ring_buf) {
+                kfree(multi->ring_buf);
+                multi->ring_buf = NULL;
+        }
+        n_of_elements = 0x1u << size;
+        ring_buf = kzalloc(sizeof(struct ads125x_sample) * n_of_elements, 
+                        GFP_KERNEL);
+
+        if (!ring_buf) {
+                return (-ENOMEM);
+        }
+        multi->ring_buf = ring_buf;
+        /* TODO initialize ring structure here */
+
+        return (0);
+}
+EXPORT_SYMBOL_GPL(ads125x_multi_ring_set_size);
+
+
+
+int ads125x_multi_ring_timedwait(struct ads125x_multi * multi, 
+                unsigned long timeout, size_t count)
+{
+        int                     ret;
+
+        INIT_COMPLETION(multi->ring_completion);
+        ret = wait_for_completion_timeout(&multi->ring_completion, timeout);
+
+        return (ret ? 0 : ETIMEDOUT);
+}
+EXPORT_SYMBOL_GPL(ads125x_multi_ring_timedwait);
 
 
 
@@ -469,23 +666,16 @@ int ads125x_buffer_enable(struct ads125x_chip * chip)
 {
         int                     ret;
 
-        spi_bus_lock(chip->multi->spi->master);
-        chip->multi->is_bus_locked = true;
         init_completion(&chip->completion);
 
         ret = chip_set_mode_bl(chip, ADS125X_MODE_CONTINUOUS);
 
         if (ret) {
-                goto fail_set_mode;
+                return (ret);
         }
         enable_irq(gpio_to_irq(chip->drdy_gpio));
 
         return (0);
-
-fail_set_mode:
-        spi_bus_unlock(chip->multi->spi->master);
-    
-        return (ret);
 }
 EXPORT_SYMBOL_GPL(ads125x_buffer_enable);
 
@@ -500,9 +690,6 @@ int ads125x_buffer_disable(struct ads125x_chip * chip)
     
         disable_irq_nosync(gpio_to_irq(chip->drdy_gpio));
         ret = chip_set_mode_bl(chip, ADS125X_MODE_IDLE);
-
-        spi_bus_unlock(chip->multi->spi->master);
-        chip->multi->is_bus_locked = false;
 
         return (ret);
 }

@@ -14,19 +14,24 @@
 #include <linux/slab.h>
 #include <linux/kernel.h>
 #include <linux/fs.h>
+#include <asm/uaccess.h>
 
 #include "ads1256.h"
 
 
 struct ads1256_state {
         struct ads125x_multi    multi;
+        bool                    is_busy;
 };
 
+static int ads1256_all_set_mux(struct ads125x_multi * multi, uint32_t positive, 
+                uint32_t negative);
 static struct ads1256_state * state_from_chip(struct ads125x_chip * chip);
 static int ads1256_open(struct inode * inode, struct file * fd);
 static int ads1256_release(struct inode * inode, struct file * fd);
 static long ads1256_ioctl(struct file * fd, unsigned int , unsigned long);
 static ssize_t ads1256_read(struct file * fd, char __user *, size_t, loff_t *);
+
 
 /*--  Module parameters  ----------------------------------------------------*/
 static int g_bus_id = 0;
@@ -137,9 +142,151 @@ static int ads1256_drdy_gpio(int id)
     
 
 
+static int ads1256_all_set_mux(struct ads125x_multi * multi, uint32_t positive, 
+                uint32_t negative)
+{
+        int                     ret;
+        unsigned int            chip_id;
+
+        if (ads125x_multi_is_locked(multi)) {
+                return (-EBUSY);
+        }
+
+        for (chip_id = 0; chip_id < ADS125X_CONFIG_SUPPORTED_CHIPS; chip_id++) {
+                if (!(multi->enabled & (0x1u << chip_id))) {
+                        ADS125X_NOT("chip %d: set_mux() skipping\n",
+                                        chip_id);
+                        continue;
+                }
+                ADS125X_NOT("chip %d: set_mux() = %d, %d\n", chip_id, 
+                        positive, negative);
+                ret = ads125x_set_mux(multi->chip[chip_id], positive, negative);
+
+                if (ret) {
+                        ADS125X_ERR("chip %d: set_mux() = %d, %d failed, err: %d\n",
+                                        chip_id, positive, negative, ret);
+
+                        return (ret);
+                }
+        }
+
+        return (0);
+}
+
+
+
+static int ads1256_all_buffer_enable(struct ads125x_multi * multi)
+{
+        int                     ret;
+        unsigned int            chip_id;
+        unsigned int            enabled_id;
+        
+        ret = ads125x_multi_lock(multi);
+
+        if (ret) {
+                return (ret);
+        }
+        enabled_id = 0;
+
+        for (chip_id = 0; chip_id < ADS125X_CONFIG_SUPPORTED_CHIPS; chip_id++) {
+                if (!(multi->enabled & (0x1u << chip_id))) {
+                        ADS125X_NOT("chip %d: buffer_enable() skipping\n",
+                                        chip_id);
+                        continue;
+                }
+                ADS125X_NOT("chip %d: buffer_enable()\n", chip_id);
+                ret = ads125x_buffer_enable(multi->chip[chip_id]);
+
+                if (ret) {
+                        ADS125X_ERR("chip %d: buffer_enable() failed, err: %d\n",
+                                        chip_id, ret);
+
+                        goto fail_buffer_enable;
+                }
+                enabled_id |= (0x1u << chip_id);
+        }
+        return (0);
+fail_buffer_enable:
+        for (chip_id = 0; chip_id < ADS125X_CONFIG_SUPPORTED_CHIPS; chip_id++) {
+                if (!(enabled_id & (0x1u << chip_id))) {
+                        continue;
+                }
+                ads125x_buffer_disable(multi->chip[chip_id]);
+        }
+        ads125x_multi_unlock(multi);
+
+        return (ret);
+}
+
+
+
+static int ads1256_all_buffer_disable(struct ads125x_multi * multi)
+{
+        int                     ret;
+        unsigned int            chip_id;
+
+        if (!ads125x_multi_is_locked(multi)) {
+                return (-EBUSY);
+        }
+
+        for (chip_id = 0; chip_id < ADS125X_CONFIG_SUPPORTED_CHIPS; chip_id++) {
+                if (!(multi->enabled & (0x1u << chip_id))) {
+                        ADS125X_NOT("chip %d: buffer_disable() skipping\n",
+                                        chip_id);
+                        continue;
+                }
+                ADS125X_NOT("chip %d: buffer_disable()\n", chip_id);
+                ret = ads125x_buffer_disable(multi->chip[chip_id]);
+
+                if (ret) {
+                        ADS125X_ERR("chip %d: buffer_disable() failed, err: %d\n",
+                                        chip_id, ret);
+                }
+        }
+        ads125x_multi_unlock(multi);
+
+        return (0);
+}
+
+
+
+static int ads1256_all_self_calibrate(struct ads125x_multi * multi)
+{
+        int                     ret;
+        unsigned int            chip_id;
+
+        if (ads125x_multi_is_locked(multi)) {
+                return (-EBUSY);
+        }
+
+        for (chip_id = 0; chip_id < ADS125X_CONFIG_SUPPORTED_CHIPS; chip_id++) {
+                if (!(multi->enabled & (0x1u << chip_id))) {
+                        ADS125X_NOT("chip %d: self_calibrate() skipping\n",
+                                        chip_id);
+                        continue;
+                }
+                ADS125X_NOT("chip %d: self_calibrate()\n", chip_id);
+                ret = ads125x_self_calibrate(multi->chip[chip_id]);
+
+                if (ret) {
+                        ADS125X_ERR("chip %d: self_calibrate() failed, err: %d\n",
+                                        chip_id, ret);
+                }
+        }
+
+        return (0);
+}
+
+
+
 static int ads1256_open(struct inode * inode, struct file * fd)
 {
         ADS125X_NOT("open(): %d:%d\n", current->group_leader->pid, current->pid);
+
+        if (g_ads1256_state.is_busy) {
+                return (-EBUSY);
+        }
+        g_ads1256_state.is_busy = true;
 
         return (0);
 }
@@ -148,6 +295,14 @@ static int ads1256_open(struct inode * inode, struct file * fd)
 
 static int ads1256_release(struct inode * inode, struct file * fd)
 {
+        ADS125X_NOT("close(): %d:%d\n", current->group_leader->pid, 
+                        current->pid);
+
+        if (!g_ads1256_state.is_busy) {
+                return (-EINVAL);
+        }
+        g_ads1256_state.is_busy = false;
+
         return (0);
 }
 
@@ -155,7 +310,54 @@ static int ads1256_release(struct inode * inode, struct file * fd)
 
 static long ads1256_ioctl(struct file * fd, unsigned int cmd, unsigned long arg)
 {
-        return (0);
+        int                     ret;
+        struct ads125x_multi *  multi = &g_ads1256_state.multi;
+        
+        switch (cmd) {
+                case ADS125X_SET_MUX: {
+                        struct ads125x_mux mux;
+                        
+                        ret = copy_from_user(&mux, (const void __user *)arg, 
+                                        sizeof(struct ads125x_mux));
+
+                        if (ret) {
+                                return (-EACCES);
+                        }
+                        ret = ads1256_all_set_mux(multi, mux.positive, 
+                                        mux.negative);
+
+                        return (ret);
+                }
+                case ADS125X_SET_BUF_SIZE: {
+                        int     buf_size;
+
+                        ret = copy_from_user(&buf_size, (const void __user*)arg,
+                                        sizeof(int));
+
+                        if (ret) {
+                                return (-EACCES);
+                        }
+                        ret = ads125x_multi_ring_set_size(multi, buf_size);
+
+                        return (ret);
+                }
+                case ADS125X_SELF_CALIBRATE: {
+
+                        return (ads1256_all_self_calibrate(multi));
+                }
+                case ADS125X_START_SAMPLING: {
+                        
+                        return (ads1256_all_buffer_enable(multi));
+                }
+                case ADS125X_STOP_SAMPLING: {
+
+                        return (ads1256_all_buffer_disable(multi));
+                }
+                default : {
+
+                        return (-EINVAL);
+                }
+        }
 }
 
 
@@ -163,6 +365,17 @@ static long ads1256_ioctl(struct file * fd, unsigned int cmd, unsigned long arg)
 static ssize_t ads1256_read(struct file * fd, char __user * buff, size_t count, 
                 loff_t * off)
 {
+        int                     ret;
+        void *                  ring_buf;
+        int                     ring_size;
+        struct ads125x_multi *  multi = &g_ads1256_state.multi;
+
+        ret = ads125x_multi_ring_timedwait(multi, HZ);
+
+        if (ret) {
+                return (ret);
+        }
+        
         return (0);
 }
 
@@ -202,6 +415,7 @@ static int __init ads1256_init(void)
 
                 return (-ENODEV);
         }
+        g_ads1256_state.is_busy = false;
         multi = &g_ads1256_state.multi;
         ret = ads125x_init_multi(multi, spi, g_en_mask);
         
@@ -293,7 +507,6 @@ fail_init_multi:
 
 static void __exit ads1256_exit(void)
 {
-        int                     ret;
         unsigned int            chip_id;
         struct ads125x_multi *  multi;
         struct spi_device *     spi;
