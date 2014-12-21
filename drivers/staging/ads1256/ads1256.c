@@ -8,6 +8,8 @@
 
 #include <linux/spi/spi.h>
 #include <linux/module.h>
+#include <linux/moduleparam.h>
+#include <linux/miscdevice.h>
 #include <linux/device.h>
 #include <linux/slab.h>
 #include <linux/kernel.h>
@@ -15,45 +17,154 @@
 
 #include "ads1256.h"
 
+
 struct ads1256_state {
-        struct ads1256_chip     chip;
+        struct ads125x_multi    multi;
 };
 
+static struct ads1256_state * state_from_chip(struct ads125x_chip * chip);
 static int ads1256_open(struct inode * inode, struct file * fd);
 static int ads1256_release(struct inode * inode, struct file * fd);
-static int ads1256_ioctl(struct file * fd, unsigned int , unsigned long);
+static long ads1256_ioctl(struct file * fd, unsigned int , unsigned long);
 static ssize_t ads1256_read(struct file * fd, char __user *, size_t, loff_t *);
 
-static const struct file_operations ads1256_fops = {
+/*--  Module parameters  ----------------------------------------------------*/
+static int g_bus_id = 0;
+module_param(g_bus_id, int, S_IRUGO);
+MODULE_PARM_DESC(g_bus_is, "SPI bus ID");
+
+static int g_en_mask = 0;
+module_param(g_en_mask, int, S_IRUGO);
+MODULE_PARM_DESC(g_en_mask, "Enabled chip mask");
+
+#if (ADS125X_CONFIG_SUPPORTED_CHIPS >= 1)
+static int g_cs0;
+module_param(g_cs0, int, S_IRUGO);
+MODULE_PARM_DESC(g_cs0, "chip 0 CS gpio");
+static int g_drdy0;
+module_param(g_drdy0, int, S_IRUGO);
+MODULE_PARM_DESC(g_drdy0, "chip 0 DRDY gpio");
+#endif
+
+#if (ADS125X_CONFIG_SUPPORTED_CHIPS >= 2)
+static int g_cs1;
+module_param(g_cs1, int, S_IRUGO);
+MODULE_PARM_DESC(g_cs1, "chip 1 CS gpio");
+static int g_drdy1;
+module_param(g_drdy1, int, S_IRUGO);
+MODULE_PARM_DESC(g_drdy1, "chip 1 DRDY gpio");
+#endif
+
+#if (ADS125X_CONFIG_SUPPORTED_CHIPS >= 3)
+static int g_cs2;
+module_param(g_cs2, int, S_IRUGO);
+MODULE_PARM_DESC(g_cs2, "chip 2 CS gpio");
+static int g_drdy2;
+module_param(g_drdy2, int, S_IRUGO);
+MODULE_PARM_DESC(g_drdy2, "chip 2 DRDY gpio");
+#endif
+
+#if (ADS125X_CONFIG_SUPPORTED_CHIPS >= 4)
+static int g_cs3;
+module_param(g_cs3, int, S_IRUGO);
+MODULE_PARM_DESC(g_cs3, "chip 3 CS gpio");
+static int g_drdy3;
+module_param(g_drdy3, int, S_IRUGO);
+MODULE_PARM_DESC(g_drdy3, "chip 3 DRDY gpio");
+#endif
+
+static const struct file_operations g_ads1256_fops = {
         .owner          = THIS_MODULE,
         .open           = ads1256_open,
-        .releas         = ads1256_release,
+        .release        = ads1256_release,
         .unlocked_ioctl = ads1256_ioctl,
         .read           = ads1256_read,
 };
 
-static struct ads1256_state * state_from_chip(struct ads1256_chip * chip);
+static struct miscdevice g_ads1256_miscdev = {
+        MISC_DYNAMIC_MINOR, 
+        ADS125X_NAME,
+        &g_ads1256_fops
+};
 
-static struct ads1256_state * state_from_chip(struct ads1256_chip * chip)
+static struct ads1256_state g_ads1256_state;
+
+
+static struct ads1256_state * state_from_chip(struct ads125x_chip * chip)
 {
-        return (container_of(chip, struct ads1256_state, chip));
+        struct ads125x_multi *  multi;
+
+        multi = chip->multi;
+
+        return (container_of(multi, struct ads1256_state, multi));
 }
+
+
+
+static int ads1256_cs_gpio(int id)
+{
+        static int * const cs[] = {
+#if (ADS125X_CONFIG_SUPPORTED_CHIPS >= 1)
+                &g_cs0,
+#endif
+#if (ADS125X_CONFIG_SUPPORTED_CHIPS >= 2)
+                &g_cs1,
+#endif
+#if (ADS125X_CONFIG_SUPPORTED_CHIPS >= 3)
+                &g_cs2,
+#endif
+#if (ADS125X_CONFIG_SUPPORTED_CHIPS >= 4)
+                &g_cs3
+#endif
+        };
+        return (*cs[id]);
+}
+
+
+
+static int ads1256_drdy_gpio(int id)
+{
+        static int * const drdy[] = {
+#if (ADS125X_CONFIG_SUPPORTED_CHIPS >= 1)
+                &g_drdy0,
+#endif
+#if (ADS125X_CONFIG_SUPPORTED_CHIPS >= 2)
+                &g_drdy1,
+#endif
+#if (ADS125X_CONFIG_SUPPORTED_CHIPS >= 3)
+                &g_drdy2,
+#endif
+#if (ADS125X_CONFIG_SUPPORTED_CHIPS >= 4)
+                &g_drdy3
+#endif
+        };
+        return (*drdy[id]);
+}
+    
 
 
 static int ads1256_open(struct inode * inode, struct file * fd)
 {
+        ADS125X_NOT("open(): %d:%d\n", current->group_leader->pid, current->pid);
+
         return (0);
 }
+
+
 
 static int ads1256_release(struct inode * inode, struct file * fd)
 {
         return (0);
 }
 
-static int ads1256_ioctl(struct file * fd, unsigned int cmd, unsigned long arg)
+
+
+static long ads1256_ioctl(struct file * fd, unsigned int cmd, unsigned long arg)
 {
         return (0);
 }
+
+
 
 static ssize_t ads1256_read(struct file * fd, char __user * buff, size_t count, 
                 loff_t * off)
@@ -61,124 +172,164 @@ static ssize_t ads1256_read(struct file * fd, char __user * buff, size_t count,
         return (0);
 }
 
-static int ads1256_probe(struct spi_device * spi)
+
+
+static int __init ads1256_init(void)
 {
-        struct ads1256_chip *   chip;
         int                     ret;
+        unsigned int            chip_id;
+        struct spi_master *     master;
+        struct spi_device *     spi;
+        struct ads125x_multi *  multi;
+        struct spi_board_info   ads1256_device_info = {
+                .modalias     = ADS125X_NAME,
+                .max_speed_hz = 10000000ul,
+                .bus_num      = g_bus_id,
+        };
 
-        chip = kzalloc(sizeof(*chip), GFP_KERNEL);
+        ADS125X_NOT("registering ADS1256 device driver\n");
 
-        if (!chip) {
-                dev_err(&spi->dev, "could not allocate ads1256 chip\n");
+        if (!g_en_mask) {
+                ADS125X_ERR("no chip enabled: set module parameters\n");
 
-                return (-ENOMEM);
+                return (-ENODEV);
         }
+        master = spi_busnum_to_master(g_bus_id);
 
-        if (!spi->dev.of_node) {
-                dev_err(&spi->dev, "missing device tree\n");
-                ret = -ENODEV;
+        if (!master) {
+                ADS125X_ERR("invalid SPI bus id: %d\n", g_bus_id);
 
-                goto fail_of_node;
+                return (-ENODEV);
         }
+        spi = spi_new_device(master, &ads1256_device_info);
 
-        if (!spi->irq) {
-                dev_err(&spi->dev, "missing SPI IRQ handler\n");
-                ret = -ENODEV;
+        if (!spi) {
+                ADS125X_ERR("could not create SPI device\n");
 
-                goto fail_spi_irq;
+                return (-ENODEV);
         }
-        spi_set_drvdata(spi, chip);
-        dev_info(&spi->dev, "evaluating DTS data\n");
-        ret = ti_sd_probe_of(spi);
-
+        multi = &g_ads1256_state.multi;
+        ret = ads125x_init_multi(multi, spi, g_en_mask);
+        
         if (ret) {
-                dev_err(&spi->dev, "failed to parse DTS data\n");
+                ADS125X_ERR("failed to init multi, err: %d\n", ret);
 
-                goto fail_dts_parse;
+                goto fail_init_multi;
         }
-        dev_info(&spi->dev, "initializing chip info\n");
-        ret = ti_sd_init_chip(chip, spi);
 
-        if (ret) {
-                dev_err(&spi->dev, "failed to initialize chip info\n");
+        for (chip_id = 0; chip_id < ADS125X_CONFIG_SUPPORTED_CHIPS; chip_id++) {
+                struct ads125x_chip * chip;
 
-                goto fail_chip_init;
+                if (!(multi->enabled & (0x1u << chip_id))) {
+                        ADS125X_NOT("chip %d: skipping\n", chip_id);
+
+                        continue;
+                }
+                chip = kzalloc(sizeof(*chip), GFP_KERNEL);
+
+                if (!chip) {
+                        ADS125X_ERR("chip %d: failed to allocate chip\n",
+                                        chip_id);
+                        ret = -ENOMEM;
+
+                        goto fail_for_chip;
+                }
+                ret = ads125x_init_chip(chip, multi, chip_id, 
+                                ads1256_cs_gpio(chip_id), 
+                                ads1256_drdy_gpio(chip_id));
+
+                if (ret) {
+                        ADS125X_ERR("chip %d: failed to init chip, err: %d\n", 
+                                        chip_id, ret);
+                        kfree(chip);
+                        
+                        goto fail_for_chip;
+                }
+                ret = ads125x_probe_trigger(chip);
+
+                if (ret) {
+                        ADS125X_ERR("chip %d: failed to init trigger, err: %d\n", 
+                                        chip_id, ret);
+                        ads125x_term_chip(chip);
+                        kfree(chip);
+
+                        goto fail_for_chip;
+                }
+                ret = ads125x_init_hw(chip);
+                
+                if (ret) {
+                        ADS125X_ERR("chip %d: failed to init hardware, err: %d\n", 
+                                        chip_id, ret);
+                        ads125x_remove_trigger(chip);
+                        ads125x_term_chip(chip);
+                        kfree(chip);
+                }
+                multi->chip[chip_id] = chip;
+                ADS125X_NOT("chip %d: cs gpio %d, drdy gpio %d\n", chip_id, 
+                                ads1256_cs_gpio(chip_id),
+                                ads1256_drdy_gpio(chip_id));
         }
-        ret = ti_sd_probe_trigger(chip);
-
-        if (ret) {
-                dev_err(&spi->dev, "failed to probe trigger\n");
-
-                goto fail_trigg_setup;
-        }
-        ret = ti_sd_init_hw(chip);
-
-        if (ret) {
-                dev_err(&spi->dev, "failed to initialize ADC\n");
-
-                goto fail_adc_init;
-        }
+        ret = misc_register(&g_ads1256_miscdev);
 
         return (ret);
-fail_adc_init:
-        ti_sd_remove_trigger(chip);
-fail_trigg_setup:
-        ti_sd_term_chip(chip);
-fail_chip_init:
-fail_dts_parse:
-fail_spi_irq:
-fail_of_node:
-        kfree(chip);
-        spi_set_drvdata(spi, NULL);
+fail_for_chip:
+        for (chip_id = 0; chip_id < ADS125X_CONFIG_SUPPORTED_CHIPS; chip_id++) {
+                struct ads125x_chip * chip;
+
+                chip = multi->chip[chip_id];
+
+                if (chip) {
+                        ADS125X_NOT("chip %d: cleaning up\n", chip_id);
+                        ads125x_term_hw(chip);
+                        ads125x_remove_trigger(chip);
+                        ads125x_term_chip(chip);
+                        kfree(chip);
+                        multi->chip[chip_id] = NULL;
+                }
+        }
+        ads125x_term_multi(multi);
+        
+fail_init_multi:
+        spi_unregister_device(spi);
 
         return (ret);
 }
-    
-static int ads1256_remove(struct spi_device * spi)
+
+
+
+static void __exit ads1256_exit(void)
 {
         int                     ret;
-        struct ads1256_state *  state;
-        struct ads1256_chip  *  chip = spi_get_drvdata(spi);
+        unsigned int            chip_id;
+        struct ads125x_multi *  multi;
+        struct spi_device *     spi;
 
-        ret = 0;
+        ADS125X_NOT("deregistering ADS1256 device driver\n");
+        multi = &g_ads1256_state.multi;
 
-        if (chip) {
-                state = state_from_chip(chip);
+        for (chip_id = 0; chip_id < ADS125X_CONFIG_SUPPORTED_CHIPS; chip_id++) {
+                struct ads125x_chip * chip;
 
-                ti_sd_term_hw(chip);
-                ti_sd_remove_trigger(chip);
-                ti_sd_term_chip(chip);
-                kfree(chip);
+                chip = multi->chip[chip_id];
+
+                if (chip) {
+                        ADS125X_INF("chip %d: cleaning up\n", chip_id);
+                        ads125x_term_hw(chip);
+                        ads125x_remove_trigger(chip);
+                        ads125x_term_chip(chip);
+                        kfree(chip);
+                        multi->chip[chip_id] = NULL;
+                }
         }
-
-        return (ret);
+        spi = multi_to_spi(multi);
+        ads125x_term_multi(multi);
+        spi_unregister_device(spi);
+        misc_deregister(&g_ads1256_miscdev);
 }
 
-static const struct of_device_id ads1256_of_match[] = {
-    {.compatible = "ti,ads1256"},
-    { /* sentinel */ }
-};
-MODULE_DEVICE_TABLE(of, ads1256_of_match);
-
-static const struct spi_device_id ads1256_id[] = {
-        { "ads1256", 0},
-        { }
-};
-MODULE_DEVICE_TABLE(spi, ads1256_id);
-
-static struct spi_driver ads1256_driver = {
-        .driver = {
-                .name           = "ads1256",
-                .owner          = THIS_MODULE,
-                .of_match_table = ads1256_of_match
-        },
-        .probe      = ads1256_probe,
-        .remove     = ads1256_remove,
-        .id_table   = ads1256_id,
-};
-module_spi_driver(ads1256_driver);
-
+module_init(ads1256_init);
+module_exit(ads1256_exit);
 MODULE_AUTHOR("Nenad Radulovic <nenad.b.radulovic@gmail.com>");
-MODULE_DESCRIPTION("Texas Instruments AD1256 ADC driver");
+MODULE_DESCRIPTION("Texas Instruments customized AD1256 ADC driver");
 MODULE_LICENSE("GPL v2");
 

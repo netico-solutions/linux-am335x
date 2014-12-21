@@ -16,6 +16,7 @@
 
 #define ADS125X_NAME                            "ads1256"
 #define ADS125X_CONFIG_TRANSFER_SIZE            16
+#define ADS125X_CONFIG_SUPPORTED_CHIPS          4
 
 #define ADS125X_REG_STATUS                      0x00u
 #define ADS125X_REG_MUX                         0x01u
@@ -83,142 +84,64 @@
 #define ADS125X_MODE_CONTINUOUS                 0
 #define ADS125X_MODE_IDLE                       1
 
+#define ADS125X_ERR(msg, ...)                                           \
+        printk(KERN_ERR "# " ADS125X_NAME ":" msg, ## __VA_ARGS__)
+#define ADS125X_INF(msg, ...)                                           \
+        printk(KERN_INFO "# " ADS125X_NAME ":" msg, ## __VA_ARGS__)
+#define ADS125X_NOT(msg, ...)                                           \
+        printk(KERN_NOTICE "# " ADS125X_NAME ":" msg, ## __VA_ARGS__)
+#define ADS125X_WRN(msg, ...)                                           \
+        printk(KERN_WARNING "# " ADS125X_NAME ":" msg, ## __VA_ARGS__)
+#define ADS125X_DBG(msg, ...)                                           \
+        printk(KERN_DEFAULT "# " ADS125X_NAME ":" msg, ## __VA_ARGS__)
 
-struct ads1256_chip {
-    struct spi_device *         spi;
-    struct spi_transfer         irq_transfer;
-    struct spi_message          irq_message;
-    struct kfifo                fifo;
-    struct completion           completion;
-    struct spi_transfer         transfer[2];
-    struct spi_message          message;
-    /*
-     * DMA (thus cache coherence maintenance) requires the transfer buffers to
-     * live in their own cache lines.
-     */
-    uint8_t                     transfer_data[ADS125X_CONFIG_TRANSFER_SIZE]
-        ____cacheline_aligned;
-    uint8_t                     irq_data[ADS125X_CONFIG_TRANSFER_SIZE]
-        ____cacheline_aligned;
-    bool                        is_bus_locked;
-    bool                        is_irq_enabled;
-    int                         cs_gpio;
-    int                         drdy_gpio; 
-    int                         id;
+struct ads125x_chip {
+        struct ads125x_multi *  multi;
+        struct completion       completion;
+        struct spi_transfer     irq_transfer;
+        struct spi_message      irq_message;
+        uint8_t                 irq_data[ADS125X_CONFIG_TRANSFER_SIZE]
+                ____cacheline_aligned;
+        bool                    is_irq_enabled;
+        int                     id;
+        int                     cs_gpio;
+        int                     drdy_gpio;
+};
+
+struct ads125x_multi {
+        struct ads125x_chip *   chip[ADS125X_CONFIG_SUPPORTED_CHIPS];
+        struct spi_device *     spi;
+        struct kfifo            fifo;
+        bool                    is_bus_locked;
+        uint32_t                enabled;
+};
+
+struct ads1256_sample {
+        uint32_t                raw[ADS125X_CONFIG_SUPPORTED_CHIPS];
 };
 
 
+int ads125x_probe_trigger(struct ads125x_chip * chip);
+int ads125x_init_multi(struct ads125x_multi * multi, struct spi_device * spi,
+                uint32_t enabled_chip_mask);
+int ads125x_init_chip(struct ads125x_chip * chip, struct ads125x_multi * multi,
+                int id, int cs_gpio, int drdy_gpio);
+int ads125x_init_hw(struct ads125x_chip * chip);
+void ads125x_term_multi(struct ads125x_multi * multi);
+int ads125x_term_chip(struct ads125x_chip * chip);
+void ads125x_term_hw(struct ads125x_chip * chip);
+void ads125x_remove_trigger(struct ads125x_chip * chip);
 
-/**
- * ti_sd_probe_of() - setup chip data from DTS
- * spi: SPI device
- *
- * Returns 0 on success, an error code otherwise
- */
-int ti_sd_probe_of(struct spi_device * spi);
+static inline 
+struct spi_device * multi_to_spi(const struct ads125x_multi * multi)
+{
+        return (multi->spi);
+}
 
-
-
-/**
- * ti_sd_probe_trigger()
- * @chip: chip device
- *
- * Returns 0 on success, an error code otherwise
- */
-int ti_sd_probe_trigger(struct ads1256_chip * chip);
-
-
-
-/**
- * ti_sd_init_chip()
- * @chip: The chip device
- * @spi: SPI device
- */
-int ti_sd_init_chip(struct ads1256_chip * chip, struct spi_device * spi);
-
-
-
-/**
- * ti_sd_init_hw()
- * @chip: the chip device
- *
- * Returns 0 on success, an error code otherwise
- */
-int ti_sd_init_hw(struct ads1256_chip * chip);
-
-
-
-/**
- * ti_sd_term()
- * @chip: chip device
- *
- * Returns 0 on success, an error code otherwise
- */
-int ti_sd_term_chip(struct ads1256_chip * chip);
-
-
-
-/**
- * ti_sd_term_hw()
- * @chip: chip device
- */
-void ti_sd_term_hw(struct ads1256_chip * chip);
-
-
-
-/**
- * ti_sd_cleanup_buffer_and_trigger()
- * @indio_dev - IIO device
- */
-void ti_sd_remove_trigger(struct ads1256_chip * chip);
-
-
-
-/**
- * ti_sd_write_reg() - Write a register
- *
- * @chip: The chip device
- * @reg: Address of the registers
- * @size: Size of the register (1 - 4)
- * @val: Value to write to the register
- *
- * Returns 0 on success, an error code otherwise
- */
-int ti_sd_write_reg(struct ads1256_chip * chip, uint32_t reg, uint32_t val);
-
-
-
-/**
- * ti_sd_read_reg()
- * @chip: The chip device
- * @reg: Address of the register
- * @val: Pointer to a buffer
- *
- * Returns 0 on success, an error code otherwise.
- */
-int ti_sd_read_reg(struct ads1256_chip * chip, uint32_t reg, uint32_t * val);
-
-
-
-/**
- * ti_sd_self_calibrate()
- * @chip: The chip device
- *
- * Returns 0 on success, an error code otherwise.
- */
-int ti_sd_self_calibrate(struct ads1256_chip * chip);
-
-
-
-/**
- * ti_sd_set_channel()
- * @chip: The sigma delta device
- * @positive: positive input channel
- * @negative: negative input channel
- *
- * Returns 0 on success, an error code otherwise.
- */
-int ti_sd_set_channel(struct ads1256_chip * chip, uint8_t positive, 
+int ads125x_write_reg(struct ads125x_chip * chip, uint32_t reg, uint32_t val);
+int ads125x_read_reg(struct ads125x_chip * chip, uint32_t reg, uint32_t * val);
+int ads125x_self_calibrate(struct ads125x_chip * chip);
+int ads125x_set_channel(struct ads125x_chip * chip, uint8_t positive, 
                 uint8_t negative);
 
 #endif /* ADS1256_H_ */
