@@ -37,14 +37,12 @@ static int g_en_mask = 0;
 module_param(g_en_mask, int, S_IRUGO);
 MODULE_PARM_DESC(g_en_mask, "Enabled chip mask");
 
-#if (ADS125X_CONFIG_SUPPORTED_CHIPS >= 1)
 static int g_cs0;
 module_param(g_cs0, int, S_IRUGO);
 MODULE_PARM_DESC(g_cs0, "chip 0 CS gpio");
 static int g_drdy0;
 module_param(g_drdy0, int, S_IRUGO);
 MODULE_PARM_DESC(g_drdy0, "chip 0 DRDY gpio");
-#endif
 
 #if (ADS125X_CONFIG_SUPPORTED_CHIPS >= 2)
 static int g_cs1;
@@ -104,9 +102,7 @@ static struct ads1256_state * state_from_chip(struct ads125x_chip * chip)
 static int ads1256_cs_gpio(int id)
 {
         static int * const cs[] = {
-#if (ADS125X_CONFIG_SUPPORTED_CHIPS >= 1)
                 &g_cs0,
-#endif
 #if (ADS125X_CONFIG_SUPPORTED_CHIPS >= 2)
                 &g_cs1,
 #endif
@@ -125,9 +121,7 @@ static int ads1256_cs_gpio(int id)
 static int ads1256_drdy_gpio(int id)
 {
         static int * const drdy[] = {
-#if (ADS125X_CONFIG_SUPPORTED_CHIPS >= 1)
                 &g_drdy0,
-#endif
 #if (ADS125X_CONFIG_SUPPORTED_CHIPS >= 2)
                 &g_drdy1,
 #endif
