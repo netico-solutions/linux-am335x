@@ -153,7 +153,7 @@ static int ads1256_all_set_mux(struct ads125x_multi * multi, uint32_t positive,
         }
 
         for (chip_id = 0; chip_id < ADS125X_CONFIG_SUPPORTED_CHIPS; chip_id++) {
-                if (!(multi->enabled & (0x1u << chip_id))) {
+                if (!(multi->enabled_chip & (0x1u << chip_id))) {
                         ADS125X_NOT("chip %d: set_mux() skipping\n",
                                         chip_id);
                         continue;
@@ -189,7 +189,7 @@ static int ads1256_all_buffer_enable(struct ads125x_multi * multi)
         enabled_id = 0;
 
         for (chip_id = 0; chip_id < ADS125X_CONFIG_SUPPORTED_CHIPS; chip_id++) {
-                if (!(multi->enabled & (0x1u << chip_id))) {
+                if (!(multi->enabled_chip & (0x1u << chip_id))) {
                         ADS125X_NOT("chip %d: buffer_enable() skipping\n",
                                         chip_id);
                         continue;
@@ -230,7 +230,7 @@ static int ads1256_all_buffer_disable(struct ads125x_multi * multi)
         }
 
         for (chip_id = 0; chip_id < ADS125X_CONFIG_SUPPORTED_CHIPS; chip_id++) {
-                if (!(multi->enabled & (0x1u << chip_id))) {
+                if (!(multi->enabled_chip & (0x1u << chip_id))) {
                         ADS125X_NOT("chip %d: buffer_disable() skipping\n",
                                         chip_id);
                         continue;
@@ -260,7 +260,7 @@ static int ads1256_all_self_calibrate(struct ads125x_multi * multi)
         }
 
         for (chip_id = 0; chip_id < ADS125X_CONFIG_SUPPORTED_CHIPS; chip_id++) {
-                if (!(multi->enabled & (0x1u << chip_id))) {
+                if (!(multi->enabled_chip & (0x1u << chip_id))) {
                         ADS125X_NOT("chip %d: self_calibrate() skipping\n",
                                         chip_id);
                         continue;
@@ -365,17 +365,6 @@ static long ads1256_ioctl(struct file * fd, unsigned int cmd, unsigned long arg)
 static ssize_t ads1256_read(struct file * fd, char __user * buff, size_t count, 
                 loff_t * off)
 {
-        int                     ret;
-        void *                  ring_buf;
-        int                     ring_size;
-        struct ads125x_multi *  multi = &g_ads1256_state.multi;
-
-        ret = ads125x_multi_ring_timedwait(multi, HZ);
-
-        if (ret) {
-                return (ret);
-        }
-        
         return (0);
 }
 
@@ -428,7 +417,7 @@ static int __init ads1256_init(void)
         for (chip_id = 0; chip_id < ADS125X_CONFIG_SUPPORTED_CHIPS; chip_id++) {
                 struct ads125x_chip * chip;
 
-                if (!(multi->enabled & (0x1u << chip_id))) {
+                if (!(multi->enabled_chip & (0x1u << chip_id))) {
                         ADS125X_NOT("chip %d: skipping\n", chip_id);
 
                         continue;

@@ -63,11 +63,11 @@ struct ads125x_sample {
         uint32_t                raw[ADS125X_CONFIG_SUPPORTED_CHIPS];
         union ads125x_sample_info {
                 uint32_t                completed_chip;
+                uint32_t                sequence;
         }                       info;
 };
 
 struct ads125x_ring {
-        spinlock_t              lock;
         unsigned int            head;
         unsigned int            tail;
         unsigned int            mask;
@@ -75,14 +75,28 @@ struct ads125x_ring {
         struct ads125x_sample * buff;
 };
 
+struct ads125x_ppbuf {
+        spinlock_t              lock;
+        struct completion       completion;
+        unsigned int            completion_level;
+        struct ads125x_ring *   producer;
+        struct ads125x_ring *   consumer;
+        struct ads125x_ring     ring[2];
+};
+
+struct ads125x_sched {
+        spinlock_t              lock;
+        unsigned int            ready;
+        unsigned int            fired;
+        bool                    is_busy;
+};
+
 struct ads125x_multi {
-        struct ads125x_chip *   chip[16];
+        struct ads125x_chip *   chip[ADS125X_CONFIG_SUPPORTED_CHIPS];
+        struct ads125x_sched    sched;
         struct spi_device *     spi;
-        struct ads125x_ring     ring;
-        struct completion       ring_completion;
-        unsigned int            enabled;
-        unsigned int            completed_sample;
-        struct ads125x_sample   current_sample;
+        struct ads125x_ppbuf    buff;
+        unsigned int            enabled_chip;
         bool                    is_bus_locked;
 };
 
@@ -113,8 +127,6 @@ bool ads125x_multi_is_locked(struct ads125x_multi * multi)
 int ads125x_multi_lock(struct ads125x_multi* multi);
 int ads125x_multi_unlock(struct ads125x_multi * multi);
 int ads125x_multi_ring_set_size(struct ads125x_multi * multi, unsigned int size);
-int ads125x_multi_ring_timedwait(struct ads125x_multi * multi, 
-                unsigned long timeout);
 
 int ads125x_self_calibrate(struct ads125x_chip * chip);
 int ads125x_set_mux(struct ads125x_chip * chip, uint8_t positive, 

@@ -7,10 +7,12 @@
  */
 
 #include <linux/spi/spi.h>
+#include <linux/gpio.h>
+#include <linux/log2.h>
 #include <linux/interrupt.h>
 #include <linux/module.h>
 #include <linux/err.h>
-#include <linux/of_gpio.h>
+#include <asm/bitops.h>
 
 #include "ads1256.h"
 
@@ -96,25 +98,22 @@ static void chip_read_data_finish_al(void * arg);
 static int chip_set_mode_bl(struct ads125x_chip * chip, uint32_t mode);
 
 
+/*--  RING  -----------------------------------------------------------------*/
+
 
 static int ring_init(struct ads125x_ring * ring, unsigned int elements)
 {
-        unsigned int            buff_size_bytes;
+        if (!is_power_of_2(elements)) {
+                ADS125X_ERR("ring_init(): elements is not power of 2: %d",
+                                elements);
 
+                return (-EINVAL);
+        }
         ring->head = 0;
         ring->tail = 0;
         ring->mask = elements - 1;
         ring->free = elements - 1;
-
-        if (ring->buff) {
-                /* reinitializing */
-                kfree(ring->buff);
-        } else {
-                /* first initialization */
-                spin_lock_init(&ring->lock);
-        }
-        buff_size_bytes = sizeof(*ring->buff) * elements;
-        ring->buff = kzalloc(buff_size_bytes, GFP_KERNEL);
+        ring->buff = kzalloc(sizeof(*ring->buff) * elements, GFP_KERNEL);
 
         if (!ring->buff) {
                 return (-ENOMEM);
@@ -125,27 +124,41 @@ static int ring_init(struct ads125x_ring * ring, unsigned int elements)
 
 
 
-static void ring_lock(struct ads125x_ring * ring, unsigned int * flags)
+static void ring_term(struct ads125x_ring * ring)
 {
-        spin_lock_irqsave(&ring->lock, *flags);
+        kfree(ring->buff);
+        ring->free = 0;
+        ring->mask = 0;
+        ring->buff = NULL;
 }
 
 
 
-staic void ring_unlock(struct ads125x_ring * ring, unsigned int * flags)
+static void ring_restart(struct ads125x_ring * ring)
 {
-        spin_lock_irqrestore(&ring->lock, flags);
+        ring->head = 0;
+        ring->tail = 0;
+        ring->free = ring->mask;
 }
 
 
 
-static unsigned int ring_occupied(struct ads125x_ring * ring)
+static unsigned int ring_occupied(const struct ads125x_ring * ring)
 {
-        unsigned int            ret;
+        return (ring->mask - ring->free);
+}
 
-        ret = ring->mask - ring->free;
 
-        return (ret);
+static unsigned int ring_free(const struct ads125x_ring * ring)
+{
+        return (ring->free);
+}
+
+
+
+static unsigned int ring_size(const struct ads125x_ring * ring)
+{
+        return (ring->mask);
 }
 
 
@@ -184,6 +197,198 @@ static struct ads125x_sample * ring_get_item(struct ads125x_ring * ring)
         return (sample);
 }
 
+/*--  PPBUF  ----------------------------------------------------------------*/
+
+
+static int ppbuf_init(struct ads125x_ppbuf * buff, unsigned int elements)
+{
+        int                     ret;
+
+        spin_lock_init(&buff->lock);
+        init_completion(&buff->completion);
+        buff->producer = &buff->ring[0];
+        buff->consumer = &buff->ring[1];
+
+        ret = ring_init(buff->producer, elements);
+
+        if (ret) {
+                return (ret);
+        }
+        ret = ring_init(buff->consumer, elements);
+
+        if (ret) {
+                ring_term(buff->producer);
+        }
+
+        return (ret);
+}
+
+
+
+static void ppbuf_term(struct ads125x_ppbuf * buff)
+{
+        ring_term(buff->producer);
+        ring_term(buff->consumer);
+}
+
+
+
+static void ppbuf_lock(struct ads125x_ppbuf * buff, unsigned long * flags)
+{
+        spin_lock_irqsave(&buff->lock, *flags);
+}
+
+
+
+static void ppbuf_unlock(struct ads125x_ppbuf * buff, unsigned long * flags)
+{
+        spin_unlock_irqrestore(&buff->lock, *flags);
+}
+
+
+
+static unsigned int ppbuf_consumer_occupied(struct ads125x_ppbuf * buff)
+{
+        return (ring_occupied(buff->consumer));
+}
+
+
+
+static void ppbuf_swap_i(struct ads125x_ppbuf * buff)
+{
+        struct ads125x_ring *   tmp;
+
+        tmp            = buff->consumer;
+        buff->consumer = buff->producer;
+        buff->producer = tmp;
+
+        ring_restart(buff->producer);
+}
+
+
+
+static struct ads125x_sample * ppbuf_current_item_i(struct ads125x_ppbuf * buff)
+{
+        return (ring_current_item(buff->producer));
+}
+
+
+
+/**
+ * Put item to producer queue
+ *
+ * If there is a completion_level set it will notify when _producer_ queue size
+ * is greater or equal to it.
+ */
+static void ppbuf_put_item_i(struct ads125x_ppbuf * buff)
+{
+        ring_put_item(buff->producer);
+
+        if (buff->completion_level) {
+                if (buff->completion_level >= ring_occupied(buff->producer)) {
+                        buff->completion_level = 0;
+                        ppbuf_swap_i(buff);
+                        complete(&buff->completion);
+                }
+        }
+}
+
+
+
+static struct ads125x_sample * ppbuf_get_item(struct ads125x_ppbuf * buff)
+{
+        return (ring_get_item(buff->consumer));
+}
+
+
+
+static void ppbuf_set_completion_i(struct ads125x_ppbuf * buff, 
+                unsigned int completion_level)
+{
+        INIT_COMPLETION(buff->completion);
+        buff->completion_level = completion_level;
+}
+
+
+
+static int ppbuf_wait_complete_timed(struct ads125x_ppbuf * buff, 
+                unsigned long timeout)
+{
+        return (wait_for_completion_timeout(&buff->completion, timeout));
+}
+
+
+/*--  SPI scheduler  --------------------------------------------------------*/
+
+
+static void spi_scheduler_init(struct ads125x_multi * multi)
+{
+        spin_lock_init(&multi->sched.lock);
+        multi->sched.ready   = 0;
+        multi->sched.fired   = 0;
+        multi->sched.is_busy = false;
+}
+
+
+
+static unsigned int spi_reschedule_i(struct ads125x_multi * multi)
+{
+        unsigned int            ready;
+        unsigned int            ret = 0;
+
+        if (!multi->sched.is_busy) {
+                ready = multi->sched.ready & ~multi->sched.fired;
+                ret   = ffs(ready);
+
+                if (ret) {
+                        multi->sched.fired  |= 0x1u << (ret - 1u);
+                        multi->sched.is_busy = true;
+                }
+        }
+
+        return (ret);
+}
+
+
+
+static unsigned int spi_schedule_ready(struct ads125x_chip * chip)
+{
+        struct ads125x_multi *  multi = chip->multi;
+        unsigned long           flags;
+        unsigned int            chip_id_no;
+
+        spin_lock_irqsave(&multi->sched.lock, flags);
+        multi->sched.ready |= 0x1u << chip->id;
+        chip_id_no          = spi_reschedule_i(multi);
+        spin_unlock_irqrestore(&multi->sched.lock, flags);
+
+        return (chip_id_no);
+}
+
+
+
+static unsigned int spi_schedule_block(struct ads125x_chip * chip)
+{
+        struct ads125x_multi *  multi = chip->multi;
+        unsigned long           flags;
+        unsigned int            chip_id_no;
+
+        spin_lock_irqsave(&multi->sched.lock, flags);
+        multi->sched.ready  &= ~(0x1u << chip->id);
+        multi->sched.is_busy = false;
+        chip_id_no           = spi_reschedule_i(multi);
+        spin_unlock_irqrestore(&multi->sched.lock, flags);
+
+        return (chip_id_no);
+}
+
+
+static void spi_scheduler_restart(struct ads125x_multi * multi)
+{
+        multi->sched.fired = 0;
+}
+
+/*--  SPI  ------------------------------------------------------------------*/
 
 
 static int chip_exchange_blocking(struct ads125x_chip * chip, 
@@ -207,10 +412,14 @@ static int chip_exchange_blocking(struct ads125x_chip * chip,
 static irqreturn_t chip_trigger_ready_handler(int irq, void * p)
 {
         struct ads125x_chip *   chip = p;
-        int                     ret;
+        unsigned int            chip_id_no;
 
         disable_irq_nosync(irq);
-        ret = chip_read_data_begin_al(chip);
+        chip_id_no = spi_schedule_ready(chip);
+
+        if (chip_id_no) {
+                chip_read_data_begin_al(chip->multi->chip[chip_id_no - 1u]);
+        }
         enable_irq(irq);
 
         return (IRQ_HANDLED);
@@ -238,15 +447,37 @@ static int chip_read_data_begin_al(struct ads125x_chip * chip)
 static void chip_read_data_finish_al(void * arg)
 {
         struct ads125x_chip *   chip = arg;
+        struct ads125x_multi *  multi = chip->multi;
+        struct ads125x_ppbuf *  buff  = &multi->buff;
+        struct ads125x_sample * current_sample;
+        unsigned long           flags;
+        unsigned int            chip_id_no;
 
         gpio_set_value(chip->cs_gpio, SPI_CS_INACTIVE);
 
-        /* push to buffers here */
+        ppbuf_lock(buff, &flags);
+        current_sample = ppbuf_current_item_i(buff);
+        current_sample->info.completed_chip |= (0x1u << chip->id);
+        current_sample->raw[chip->id]        = (chip->irq_data[2] << 16) | 
+                                               (chip->irq_data[1] <<  8) |
+                                               (chip->irq_data[0] <<  0);
 
+        if (current_sample->info.completed_chip == multi->enabled_chip) {
+                /* At this point all relevant chips were sampled */
+                ppbuf_put_item_i(buff);
+                ppbuf_current_item_i(buff)->info.completed_chip = 0;
+                ppbuf_unlock(buff, &flags);
+                spi_scheduler_restart(multi);
+        } else {
+                ppbuf_unlock(buff, &flags);
+        }
+        chip_id_no = spi_schedule_block(chip);
+
+        if (chip_id_no) {
+                chip_read_data_begin_al(chip->multi->chip[chip_id_no - 1u]);
+        }
         complete(&chip->completion);
 }
-
-
 
 
 
@@ -401,8 +632,9 @@ int ads125x_init_multi(struct ads125x_multi * multi, struct spi_device * spi,
         }
         multi->spi           = spi;
         multi->is_bus_locked = false;
-        multi->enabled       = enabled_chip_mask;
-        ret = ads125x_multi_ring_set_size(multi, 100u);
+        multi->enabled_chip  = enabled_chip_mask;
+        spi_scheduler_init(multi);
+        ret = ppbuf_init(&multi->buff, 1024);
 
         return (ret);
 fail_fifo_setup:
@@ -503,7 +735,7 @@ void ads125x_term_multi(struct ads125x_multi * multi)
 {
         if (multi->spi) {
                 multi->spi = NULL;
-                kfifo_free(&multi->fifo);
+                ppbuf_term(&multi->buff);
         }
 }
 EXPORT_SYMBOL_GPL(ads125x_term_multi);
@@ -597,7 +829,6 @@ int ads125x_multi_lock(struct ads125x_multi* multi)
         }
         spi_bus_lock(multi->spi->master);
         multi->is_bus_locked = true;
-        init_completion(&multi->ring_complete);
 
         return (0);
 }
@@ -621,44 +852,17 @@ EXPORT_SYMBOL_GPL(ads125x_multi_unlock);
 
 int ads125x_multi_ring_set_size(struct ads125x_multi * multi, unsigned int size)
 {
-        void *                  ring_buf;
-        unsigned int            n_of_elements;
+        int                     ret;
 
         if (!multi->is_bus_locked) {
                 return (-EBUSY);
         }
+        ppbuf_term(&multi->buff);
+        ret = ppbuf_init(&multi->buff, size);
 
-        if (multi->ring_buf) {
-                kfree(multi->ring_buf);
-                multi->ring_buf = NULL;
-        }
-        n_of_elements = 0x1u << size;
-        ring_buf = kzalloc(sizeof(struct ads125x_sample) * n_of_elements, 
-                        GFP_KERNEL);
-
-        if (!ring_buf) {
-                return (-ENOMEM);
-        }
-        multi->ring_buf = ring_buf;
-        /* TODO initialize ring structure here */
-
-        return (0);
+        return (ret);
 }
 EXPORT_SYMBOL_GPL(ads125x_multi_ring_set_size);
-
-
-
-int ads125x_multi_ring_timedwait(struct ads125x_multi * multi, 
-                unsigned long timeout, size_t count)
-{
-        int                     ret;
-
-        INIT_COMPLETION(multi->ring_completion);
-        ret = wait_for_completion_timeout(&multi->ring_completion, timeout);
-
-        return (ret ? 0 : ETIMEDOUT);
-}
-EXPORT_SYMBOL_GPL(ads125x_multi_ring_timedwait);
 
 
 
