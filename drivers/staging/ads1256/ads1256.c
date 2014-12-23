@@ -26,7 +26,6 @@ struct ads1256_state {
 
 static int ads1256_all_set_mux(struct ads125x_multi * multi, uint32_t positive, 
                 uint32_t negative);
-static struct ads1256_state * state_from_chip(struct ads125x_chip * chip);
 static int ads1256_open(struct inode * inode, struct file * fd);
 static int ads1256_release(struct inode * inode, struct file * fd);
 static long ads1256_ioctl(struct file * fd, unsigned int , unsigned long);
@@ -92,18 +91,6 @@ static struct miscdevice g_ads1256_miscdev = {
 
 static struct ads1256_state g_ads1256_state;
 
-
-static struct ads1256_state * state_from_chip(struct ads125x_chip * chip)
-{
-        struct ads125x_multi *  multi;
-
-        multi = chip->multi;
-
-        return (container_of(multi, struct ads1256_state, multi));
-}
-
-
-
 static int ads1256_cs_gpio(int id)
 {
         static int * const cs[] = {
@@ -148,12 +135,8 @@ static int ads1256_all_set_mux(struct ads125x_multi * multi, uint32_t positive,
         int                     ret;
         unsigned int            chip_id;
 
-        if (ads125x_multi_is_locked(multi)) {
-                return (-EBUSY);
-        }
-
         for (chip_id = 0; chip_id < ADS125X_CONFIG_SUPPORTED_CHIPS; chip_id++) {
-                if (!(multi->enabled_chip & (0x1u << chip_id))) {
+                if (!ads125x_is_chip_enabled(multi, chip_id)) {
                         ADS125X_NOT("chip %d: set_mux() skipping\n",
                                         chip_id);
                         continue;
@@ -189,7 +172,7 @@ static int ads1256_all_buffer_enable(struct ads125x_multi * multi)
         enabled_id = 0;
 
         for (chip_id = 0; chip_id < ADS125X_CONFIG_SUPPORTED_CHIPS; chip_id++) {
-                if (!(multi->enabled_chip & (0x1u << chip_id))) {
+                if (!ads125x_is_chip_enabled(multi, chip_id)) {
                         ADS125X_NOT("chip %d: buffer_enable() skipping\n",
                                         chip_id);
                         continue;
@@ -230,7 +213,7 @@ static int ads1256_all_buffer_disable(struct ads125x_multi * multi)
         }
 
         for (chip_id = 0; chip_id < ADS125X_CONFIG_SUPPORTED_CHIPS; chip_id++) {
-                if (!(multi->enabled_chip & (0x1u << chip_id))) {
+                if (!ads125x_is_chip_enabled(multi, chip_id)) {
                         ADS125X_NOT("chip %d: buffer_disable() skipping\n",
                                         chip_id);
                         continue;
@@ -260,7 +243,7 @@ static int ads1256_all_self_calibrate(struct ads125x_multi * multi)
         }
 
         for (chip_id = 0; chip_id < ADS125X_CONFIG_SUPPORTED_CHIPS; chip_id++) {
-                if (!(multi->enabled_chip & (0x1u << chip_id))) {
+                if (!ads125x_is_chip_enabled(multi, chip_id)) {
                         ADS125X_NOT("chip %d: self_calibrate() skipping\n",
                                         chip_id);
                         continue;
@@ -287,6 +270,7 @@ static int ads1256_open(struct inode * inode, struct file * fd)
                 return (-EBUSY);
         }
         g_ads1256_state.is_busy = true;
+        fd->private_data = &g_ads1256_state.multi;
 
         return (0);
 }
@@ -311,7 +295,7 @@ static int ads1256_release(struct inode * inode, struct file * fd)
 static long ads1256_ioctl(struct file * fd, unsigned int cmd, unsigned long arg)
 {
         int                     ret;
-        struct ads125x_multi *  multi = &g_ads1256_state.multi;
+        struct ads125x_multi *  multi = fd->private_data;
         
         switch (cmd) {
                 case ADS125X_SET_MUX: {
@@ -365,7 +349,16 @@ static long ads1256_ioctl(struct file * fd, unsigned int cmd, unsigned long arg)
 static ssize_t ads1256_read(struct file * fd, char __user * buff, size_t count, 
                 loff_t * off)
 {
-        return (0);
+        struct ads125x_multi *  multi = fd->private_data;
+        ssize_t                 ret;
+
+        ret = ads125x_multi_ring_get_items(multi, buff, count, HZ);
+
+        if (ret > 0) {
+                *off += ret;
+        }
+        
+        return (ret);
 }
 
 
@@ -417,7 +410,7 @@ static int __init ads1256_init(void)
         for (chip_id = 0; chip_id < ADS125X_CONFIG_SUPPORTED_CHIPS; chip_id++) {
                 struct ads125x_chip * chip;
 
-                if (!(multi->enabled_chip & (0x1u << chip_id))) {
+                if (!ads125x_is_chip_enabled(multi, chip_id)) {
                         ADS125X_NOT("chip %d: skipping\n", chip_id);
 
                         continue;

@@ -48,6 +48,7 @@ struct ads125x_mux {
 
 struct ads125x_chip {
         struct ads125x_multi *  multi;
+        /* used to wait for one sample completion in _buffer_disable() */
         struct completion       completion;
         struct spi_transfer     irq_transfer;
         struct spi_message      irq_message;
@@ -76,8 +77,7 @@ struct ads125x_ring {
 };
 
 struct ads125x_ppbuf {
-        spinlock_t              lock;
-        struct completion       completion;
+        struct completion       completion; 
         unsigned int            completion_level;
         struct ads125x_ring *   producer;
         struct ads125x_ring *   consumer;
@@ -85,7 +85,6 @@ struct ads125x_ppbuf {
 };
 
 struct ads125x_sched {
-        spinlock_t              lock;
         unsigned int            ready;
         unsigned int            fired;
         bool                    is_busy;
@@ -97,7 +96,7 @@ struct ads125x_multi {
         struct ads125x_sched    sched;
         struct spi_device *     spi;
         struct ads125x_ppbuf    buff;
-        unsigned int            enabled_chip;
+        unsigned int            enabled_chips;
         bool                    is_bus_locked;
 };
 
@@ -127,11 +126,33 @@ bool ads125x_multi_is_locked(struct ads125x_multi * multi)
 }
 int ads125x_multi_lock(struct ads125x_multi* multi);
 int ads125x_multi_unlock(struct ads125x_multi * multi);
+
+static inline
+unsigned int ads125x_enabled_chips(struct ads125x_multi * multi)
+{
+        return (multi->enabled_chips);
+}
+
+static inline
+bool ads125x_is_chip_enabled(const struct ads125x_multi * multi, 
+                unsigned int chip_id)
+{
+        if (multi->enabled_chips & (0x1u << chip_id)) {
+                return (true);
+        } else {
+                return (false);
+        }
+}
+
 int ads125x_multi_ring_set_size(struct ads125x_multi * multi, unsigned int size);
+size_t ads125x_multi_ring_get_size(struct ads125x_multi * multi);
 
 int ads125x_self_calibrate(struct ads125x_chip * chip);
 int ads125x_set_mux(struct ads125x_chip * chip, uint8_t positive, 
                 uint8_t negative);
+
+ssize_t ads125x_multi_ring_get_items(struct ads125x_multi * multi,
+                char * buf, size_t count, unsigned long timeout);
 int ads125x_buffer_enable(struct ads125x_chip * chip);
 int ads125x_buffer_disable(struct ads125x_chip * chip);
 

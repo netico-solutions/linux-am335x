@@ -13,6 +13,7 @@
 #include <linux/module.h>
 #include <linux/err.h>
 #include <asm/bitops.h>
+#include <asm/uaccess.h>
 
 #include "ads1256.h"
 
@@ -149,12 +150,6 @@ static unsigned int ring_occupied(const struct ads125x_ring * ring)
 }
 
 
-static unsigned int ring_free(const struct ads125x_ring * ring)
-{
-        return (ring->free);
-}
-
-
 
 static unsigned int ring_size(const struct ads125x_ring * ring)
 {
@@ -163,7 +158,8 @@ static unsigned int ring_size(const struct ads125x_ring * ring)
 
 
 
-static struct ads125x_sample * ring_current_item(struct ads125x_ring * ring)
+static struct ads125x_sample * ring_current_item(
+                const struct ads125x_ring * ring)
 {
         return (&ring->buff[ring->tail]);
 }
@@ -204,10 +200,10 @@ static int ppbuf_init(struct ads125x_ppbuf * buff, unsigned int elements)
 {
         int                     ret;
 
-        spin_lock_init(&buff->lock);
         init_completion(&buff->completion);
-        buff->producer = &buff->ring[0];
-        buff->consumer = &buff->ring[1];
+        buff->completion_level = 0;
+        buff->producer         = &buff->ring[0];
+        buff->consumer         = &buff->ring[1];
 
         ret = ring_init(buff->producer, elements);
 
@@ -233,23 +229,16 @@ static void ppbuf_term(struct ads125x_ppbuf * buff)
 
 
 
-static void ppbuf_lock(struct ads125x_ppbuf * buff, unsigned long * flags)
-{
-        spin_lock_irqsave(&buff->lock, *flags);
-}
-
-
-
-static void ppbuf_unlock(struct ads125x_ppbuf * buff, unsigned long * flags)
-{
-        spin_unlock_irqrestore(&buff->lock, *flags);
-}
-
-
-
-static unsigned int ppbuf_consumer_occupied(struct ads125x_ppbuf * buff)
+static unsigned int ppbuf_consumer_occupied(const struct ads125x_ppbuf * buff)
 {
         return (ring_occupied(buff->consumer));
+}
+
+
+
+static unsigned int ppbuf_size(const struct ads125x_ppbuf * buff)
+{
+        return (ring_size(buff->producer) * 2u);
 }
 
 
@@ -323,7 +312,6 @@ static int ppbuf_wait_complete_timed(struct ads125x_ppbuf * buff,
 
 static void spi_scheduler_init(struct ads125x_multi * multi)
 {
-        spin_lock_init(&multi->sched.lock);
         multi->sched.ready   = 0;
         multi->sched.fired   = 0;
         multi->sched.is_busy = false;
@@ -351,33 +339,27 @@ static unsigned int spi_reschedule_i(struct ads125x_multi * multi)
 
 
 
-static unsigned int spi_schedule_ready(struct ads125x_chip * chip)
+static unsigned int spi_schedule_i(struct ads125x_chip * chip)
 {
         struct ads125x_multi *  multi = chip->multi;
-        unsigned long           flags;
         unsigned int            chip_id_no;
 
-        spin_lock_irqsave(&multi->sched.lock, flags);
         multi->sched.ready |= 0x1u << chip->id;
         chip_id_no          = spi_reschedule_i(multi);
-        spin_unlock_irqrestore(&multi->sched.lock, flags);
 
         return (chip_id_no);
 }
 
 
 
-static unsigned int spi_schedule_block(struct ads125x_chip * chip)
+static unsigned int spi_schedule_block_i(struct ads125x_chip * chip)
 {
         struct ads125x_multi *  multi = chip->multi;
-        unsigned long           flags;
         unsigned int            chip_id_no;
 
-        spin_lock_irqsave(&multi->sched.lock, flags);
         multi->sched.ready  &= ~(0x1u << chip->id);
         multi->sched.is_busy = false;
         chip_id_no           = spi_reschedule_i(multi);
-        spin_unlock_irqrestore(&multi->sched.lock, flags);
 
         return (chip_id_no);
 }
@@ -412,10 +394,14 @@ static int chip_exchange_blocking(struct ads125x_chip * chip,
 static irqreturn_t chip_trigger_ready_handler(int irq, void * p)
 {
         struct ads125x_chip *   chip = p;
+        struct ads125x_multi *  multi = chip->multi;
+        unsigned long           flags;
         unsigned int            chip_id_no;
 
         disable_irq_nosync(irq);
-        chip_id_no = spi_schedule_ready(chip);
+        spin_lock_irqsave(&multi->lock, flags);
+        chip_id_no = spi_schedule_i(chip);
+        spin_unlock_irqrestore(&multi->lock, flags);
 
         if (chip_id_no) {
                 chip_read_data_begin_al(chip->multi->chip[chip_id_no - 1u]);
@@ -455,23 +441,21 @@ static void chip_read_data_finish_al(void * arg)
 
         gpio_set_value(chip->cs_gpio, SPI_CS_INACTIVE);
 
-        ppbuf_lock(buff, &flags);
+        spin_lock_irqsave(&multi->lock, flags);
         current_sample = ppbuf_current_item_i(buff);
         current_sample->info.completed_chip |= (0x1u << chip->id);
         current_sample->raw[chip->id]        = (chip->irq_data[2] << 16) | 
                                                (chip->irq_data[1] <<  8) |
                                                (chip->irq_data[0] <<  0);
 
-        if (current_sample->info.completed_chip == multi->enabled_chip) {
+        if (current_sample->info.completed_chip == multi->enabled_chips) {
                 /* At this point all relevant chips were sampled */
                 ppbuf_put_item_i(buff);
                 ppbuf_current_item_i(buff)->info.completed_chip = 0;
-                ppbuf_unlock(buff, &flags);
                 spi_scheduler_restart(multi);
-        } else {
-                ppbuf_unlock(buff, &flags);
         }
-        chip_id_no = spi_schedule_block(chip);
+        chip_id_no = spi_schedule_block_i(chip);
+        spin_unlock_irqrestore(&multi->lock, flags);
 
         if (chip_id_no) {
                 chip_read_data_begin_al(chip->multi->chip[chip_id_no - 1u]);
@@ -609,7 +593,7 @@ EXPORT_SYMBOL_GPL(ads125x_probe_trigger);
 
 
 int ads125x_init_multi(struct ads125x_multi * multi, struct spi_device * spi,
-                uint32_t enabled_chip_mask)
+                uint32_t enabled_chips_mask)
 {
         int                     ret;
 
@@ -633,7 +617,7 @@ int ads125x_init_multi(struct ads125x_multi * multi, struct spi_device * spi,
         }
         multi->spi           = spi;
         multi->is_bus_locked = false;
-        multi->enabled_chip  = enabled_chip_mask;
+        multi->enabled_chips = enabled_chips_mask;
         spi_scheduler_init(multi);
 
         return (ret);
@@ -864,6 +848,76 @@ int ads125x_multi_ring_set_size(struct ads125x_multi * multi, unsigned int size)
 }
 EXPORT_SYMBOL_GPL(ads125x_multi_ring_set_size);
 
+
+
+size_t ads125x_multi_ring_get_size(struct ads125x_multi * multi)
+{
+        return (ppbuf_size(&multi->buff));
+}
+EXPORT_SYMBOL_GPL(ads125x_multi_ring_get_size);
+
+
+
+ssize_t ads125x_multi_ring_get_items(struct ads125x_multi * multi,
+                char * buf, size_t count, unsigned long timeout)
+{
+        unsigned int            transfer_pending;
+        unsigned int            transfer;
+        unsigned int            transferred;
+
+        if ((count % (sizeof(struct ads125x_sample)) != 0)) {
+                return (-EINVAL);
+        }
+        transfer_pending = count / sizeof(struct ads125x_sample);
+
+        if (transfer_pending > ppbuf_size(&multi->buff)) {
+                transfer_pending = ppbuf_size(&multi->buff);
+        }
+        transfer = transfer_pending;
+
+        if (transfer > ppbuf_consumer_occupied(&multi->buff)) {
+                transfer = ppbuf_consumer_occupied(&multi->buff);
+        }
+
+        for (transferred = 0; transferred < transfer; transferred++) {
+                struct ads125x_sample * sample;
+
+                sample = ppbuf_get_item(&multi->buff);
+
+                if (copy_to_user(buf, sample, sizeof(*sample))) {
+                        return (-EINVAL);
+                }
+        }
+        transferred++;
+        transfer_pending -= transferred;
+
+        if (transfer_pending) {
+                unsigned int    ret;
+                unsigned long   flags;
+
+                spin_lock_irqsave(&multi->lock, flags);
+                ppbuf_set_completion_i(&multi->buff, transfer_pending);
+                spin_unlock_irqrestore(&multi->lock, flags);
+                ret = ppbuf_wait_complete_timed(&multi->buff, timeout);
+
+                if (ret) {
+                        return (-ETIMEDOUT);
+                }
+                for (transferred = 0; transferred < transfer; transferred++) {
+                        struct ads125x_sample * sample;
+
+                        sample = ppbuf_get_item(&multi->buff);
+
+                        if (copy_to_user(buf, sample, sizeof(*sample))) {
+                                return (-EINVAL);
+                        }
+                }
+        }
+
+        return (transferred);
+}
+EXPORT_SYMBOL_GPL(ads125x_multi_ring_get_items);
+        
 
 
 int ads125x_buffer_enable(struct ads125x_chip * chip)
