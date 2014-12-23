@@ -624,7 +624,8 @@ int ads125x_init_multi(struct ads125x_multi * multi, struct spi_device * spi,
 
                 goto fail_spi_setup; 
         }
-        /* setup fifo/ring buffer here */
+        ret = ppbuf_init(&multi->buff, 1024);
+
         if (ret) {
                 ADS125X_ERR("FIFO setup failed\n");
 
@@ -634,7 +635,6 @@ int ads125x_init_multi(struct ads125x_multi * multi, struct spi_device * spi,
         multi->is_bus_locked = false;
         multi->enabled_chip  = enabled_chip_mask;
         spi_scheduler_init(multi);
-        ret = ppbuf_init(&multi->buff, 1024);
 
         return (ret);
 fail_fifo_setup:

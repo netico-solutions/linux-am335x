@@ -92,6 +92,7 @@ struct ads125x_sched {
 };
 
 struct ads125x_multi {
+        spinlock_t              lock;
         struct ads125x_chip *   chip[ADS125X_CONFIG_SUPPORTED_CHIPS];
         struct ads125x_sched    sched;
         struct spi_device *     spi;
