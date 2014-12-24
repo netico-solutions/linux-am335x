@@ -313,15 +313,8 @@ static long ads1256_ioctl(struct file * fd, unsigned int cmd, unsigned long arg)
                         return (ret);
                 }
                 case ADS125X_SET_BUF_SIZE: {
-                        int     buf_size;
-
-                        ret = copy_from_user(&buf_size, (const void __user*)arg,
-                                        sizeof(int));
-
-                        if (ret) {
-                                return (-EACCES);
-                        }
-                        ret = ads125x_multi_ring_set_size(multi, buf_size);
+                        ret = ads125x_multi_ring_set_size(multi, 
+                                (unsigned int)arg);
 
                         return (ret);
                 }
@@ -423,7 +416,9 @@ static int __init ads1256_init(void)
                         ret = -ENOMEM;
 
                         goto fail_for_chip;
-                }
+                } 
+                ADS125X_DBG("chip %d: init_chip(chip = %p, multi = %p, chip_id = %d, cs = %d, drdy = %d)\n",
+                                chip_id, chip, multi, chip_id, ads1256_cs_gpio(chip_id), ads1256_drdy_gpio(chip_id));
                 ret = ads125x_init_chip(chip, multi, chip_id, 
                                 ads1256_cs_gpio(chip_id), 
                                 ads1256_drdy_gpio(chip_id));
@@ -435,6 +430,8 @@ static int __init ads1256_init(void)
                         
                         goto fail_for_chip;
                 }
+                ADS125X_DBG("chip %d: probe_trigger(chip = %p)\n", chip_id, 
+                                chip);
                 ret = ads125x_probe_trigger(chip);
 
                 if (ret) {
@@ -445,6 +442,7 @@ static int __init ads1256_init(void)
 
                         goto fail_for_chip;
                 }
+                ADS125X_DBG("chip %d: init_hw(chip = %p)\n", chip_id, chip);
                 ret = ads125x_init_hw(chip);
                 
                 if (ret) {

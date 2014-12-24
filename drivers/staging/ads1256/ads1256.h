@@ -9,26 +9,11 @@
 #ifndef ADS1256_H_
 #define ADS1256_H_
 
+#include <linux/ioctl.h>
 #include <linux/types.h>
 #include <linux/completion.h>
-#include <linux/ioctl.h>
 #include <linux/spinlock.h>
-
-/*--  IOCTL  ----------------------------------------------------------------*/
-
-struct ads125x_mux {
-        int                     positive;
-        int                     negative;
-};
-
-#define ADS125X_MAGIC                           'x'
-#define ADS125X_SET_MUX                                                 \
-        _IOW(ADS125X_MAGIC, 100, struct ads125x_mux)
-#define ADS125X_SET_BUF_SIZE                                            \
-        _IOW(ADS125X_MAGIC, 101, int)
-#define ADS125X_SELF_CALIBRATE                  _IO(ADS125X_MAGIC, 102)
-#define ADS125X_START_SAMPLING                  _IO(ADS125X_MAGIC, 115)
-#define ADS125X_STOP_SAMPLING                   _IO(ADS125X_MAGIC, 116)
+#include <misc/ads1256.h>
 
 /*--  Configuration  --------------------------------------------------------*/
 #define ADS125X_NAME                            "ads1256"
@@ -36,15 +21,15 @@ struct ads125x_mux {
 
 
 #define ADS125X_ERR(msg, ...)                                           \
-        printk(KERN_ERR "# " ADS125X_NAME ":" msg, ## __VA_ARGS__)
+        printk(KERN_ERR ADS125X_NAME " error: " msg, ## __VA_ARGS__)
 #define ADS125X_INF(msg, ...)                                           \
-        printk(KERN_INFO "# " ADS125X_NAME ":" msg, ## __VA_ARGS__)
+        printk(KERN_INFO ADS125X_NAME " info: " msg, ## __VA_ARGS__)
 #define ADS125X_NOT(msg, ...)                                           \
-        printk(KERN_NOTICE "# " ADS125X_NAME ":" msg, ## __VA_ARGS__)
+        printk(KERN_NOTICE  ADS125X_NAME ": " msg, ## __VA_ARGS__)
 #define ADS125X_WRN(msg, ...)                                           \
-        printk(KERN_WARNING "# " ADS125X_NAME ":" msg, ## __VA_ARGS__)
+        printk(KERN_WARNING ADS125X_NAME " warning: " msg, ## __VA_ARGS__)
 #define ADS125X_DBG(msg, ...)                                           \
-        printk(KERN_DEFAULT "# " ADS125X_NAME ":" msg, ## __VA_ARGS__)
+        printk(KERN_DEFAULT ADS125X_NAME " debug: " msg, ## __VA_ARGS__)
 
 struct ads125x_chip {
         struct ads125x_multi *  multi;

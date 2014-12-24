@@ -563,21 +563,25 @@ static int ads125x_read_reg(struct ads125x_chip * chip, uint32_t reg,
 int ads125x_probe_trigger(struct ads125x_chip * chip)
 {
         int                     ret;
-        char                    label[16];
+        char                    label[64];
 
         ret = gpio_to_irq(chip->drdy_gpio);
 
         if (ret < 0) {
-                ADS125X_ERR(" trigger setup failed.\n");
+                ADS125X_ERR("trigger setup failed, err: %d.\n", ret);
 
                 goto fail_gpio_irq;
         }
         init_completion(&chip->completion);
         sprintf(label, ADS125X_NAME "-%d-drdy-irq", chip->id);
+        ADS125X_INF("chip %d: probe_trigger(): requesting trigger IRQ: %d, name: %s\n",
+                        chip->id, ret, label);
         ret = request_irq(ret, &chip_trigger_ready_handler,
                 IRQF_TRIGGER_FALLING, label, chip);
 
         if (ret) {
+                ADS125X_ERR("trigger IRQ setup failed, err: %d.\n", ret);
+
                 goto fail_irq_request;
         }
 
@@ -601,7 +605,7 @@ int ads125x_init_multi(struct ads125x_multi * multi, struct spi_device * spi,
         spi->mode           = SPI_MODE_0;
         spi->max_speed_hz   = 10000000ul;
 
-        ret = spi_setup(multi->spi);
+        ret = spi_setup(spi);
 
         if (ret) {
                 ADS125X_ERR("SPI setup failed\n");
@@ -859,10 +863,12 @@ EXPORT_SYMBOL_GPL(ads125x_multi_ring_get_size);
 
 
 ssize_t ads125x_multi_ring_get_items(struct ads125x_multi * multi,
-                char * buf, size_t count, unsigned long timeout)
+                char * buff, size_t count, unsigned long timeout)
 {
+        struct ads125x_sample * sample_buff = (struct ads125x_sample *)buff;
         unsigned int            transfer_pending;
         unsigned int            transfer;
+        unsigned int            transfer_count;
         unsigned int            transferred;
 
         if ((count % (sizeof(struct ads125x_sample)) != 0)) {
@@ -879,16 +885,17 @@ ssize_t ads125x_multi_ring_get_items(struct ads125x_multi * multi,
                 transfer = ppbuf_consumer_occupied(&multi->buff);
         }
 
-        for (transferred = 0; transferred < transfer; transferred++) {
+        for (transferred = 0, transfer_count = 0; 
+                        transfer_count < transfer; transfer_count++) {
                 struct ads125x_sample * sample;
 
                 sample = ppbuf_get_item(&multi->buff);
 
-                if (copy_to_user(buf, sample, sizeof(*sample))) {
+                if (copy_to_user(sample_buff++, sample, sizeof(*sample))) {
                         return (-EINVAL);
                 }
+                transferred++;
         }
-        transferred++;
         transfer_pending -= transferred;
 
         if (transfer_pending) {
@@ -903,14 +910,17 @@ ssize_t ads125x_multi_ring_get_items(struct ads125x_multi * multi,
                 if (ret) {
                         return (-ETIMEDOUT);
                 }
-                for (transferred = 0; transferred < transfer; transferred++) {
+
+                for (transfer_count = 0; transfer_count < transfer_pending; 
+                                transfer_count++) {
                         struct ads125x_sample * sample;
 
                         sample = ppbuf_get_item(&multi->buff);
 
-                        if (copy_to_user(buf, sample, sizeof(*sample))) {
+                        if (copy_to_user(sample_buff++, sample, sizeof(*sample))) {
                                 return (-EINVAL);
                         }
+                        transferred++;
                 }
         }
 
