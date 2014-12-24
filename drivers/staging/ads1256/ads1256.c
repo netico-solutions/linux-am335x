@@ -313,8 +313,29 @@ static long ads1256_ioctl(struct file * fd, unsigned int cmd, unsigned long arg)
                         return (ret);
                 }
                 case ADS125X_SET_BUF_SIZE: {
-                        ret = ads125x_multi_ring_set_size(multi, 
-                                (unsigned int)arg);
+                        int     buff_size;
+
+                        ret = copy_from_user(&buff_size, 
+                                        (const void __user *)arg, sizeof(int));
+
+                        if (ret) {
+                                return (-EACCES);
+                        }
+                        ret = ads125x_multi_ring_set_size(multi, buff_size);
+
+                        return (ret);
+                }
+                case ADS125X_SET_LOG_LEVEL : {
+                        int     log_level;
+
+                        ret = copy_from_user(&log_level, 
+                                        (const void __user *)arg, sizeof(int));
+
+
+                        if (ret) {
+                                return (-EACCES);
+                        }
+                        ret = ads125x_set_log_level(log_level);
 
                         return (ret);
                 }

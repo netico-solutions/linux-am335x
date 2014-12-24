@@ -98,6 +98,8 @@ static int chip_read_data_begin_al(struct ads125x_chip * chip);
 static void chip_read_data_finish_al(void * arg);
 static int chip_set_mode_bl(struct ads125x_chip * chip, uint32_t mode);
 
+int g_log_level = 5;
+EXPORT_SYMBOL_GPL(g_log_level);
 
 /*--  RING  -----------------------------------------------------------------*/
 
@@ -604,7 +606,7 @@ int ads125x_init_multi(struct ads125x_multi * multi, struct spi_device * spi,
         spi->bits_per_word  = 8;
         spi->mode           = SPI_MODE_0;
         spi->max_speed_hz   = 10000000ul;
-
+        ADS125X_INF("multi: setup spi\n");
         ret = spi_setup(spi);
 
         if (ret) {
@@ -612,16 +614,19 @@ int ads125x_init_multi(struct ads125x_multi * multi, struct spi_device * spi,
 
                 goto fail_spi_setup; 
         }
-        ret = ppbuf_init(&multi->buff, 1024);
+        ADS125X_INF("multi: setup buffers, size: 2x%d samples\n", 
+                        ADS125X_CONFIG_BUFFER_SIZE);
+        ret = ppbuf_init(&multi->buff, ADS125X_CONFIG_BUFFER_SIZE);
 
         if (ret) {
-                ADS125X_ERR("FIFO setup failed\n");
+                ADS125X_ERR("buffer setup failed\n");
 
                 goto fail_fifo_setup;
         }
         multi->spi           = spi;
         multi->is_bus_locked = false;
         multi->enabled_chips = enabled_chips_mask;
+        ADS125X_INF("initializing SPI scheduler\n");
         spi_scheduler_init(multi);
 
         return (ret);
@@ -691,6 +696,7 @@ int ads125x_init_hw(struct ads125x_chip * chip)
 {
         int                     ret;
 
+        ADS125X_INF("chip %d: enable autocalibration\n", chip->id);
         ret = ads125x_write_reg(chip, ADS125X_REG_STATUS, ADS125X_STATUS_ACAL);
 
         if (ret) {
@@ -701,11 +707,13 @@ int ads125x_init_hw(struct ads125x_chip * chip)
         if (ret) {
                 goto fail_write;
         }
+        ADS125X_INF("chip %d: setup refresh rate\n", chip->id);
         ret = ads125x_write_reg(chip, ADS125X_REG_DRATE,  ADS125X_DRATE_10);
 
         if (ret) {
                 goto fail_write;
         }
+        ADS125X_INF("chip %d: initialize on chip GPIO\n", chip->id);
         ret = ads125x_write_reg(chip, ADS125X_REG_IO,     0);
 
         if (ret) {
@@ -765,6 +773,23 @@ void ads125x_remove_trigger(struct ads125x_chip * chip)
         free_irq(gpio_to_irq(chip->drdy_gpio), chip);
 }
 EXPORT_SYMBOL_GPL(ads125x_remove_trigger);
+
+
+
+int ads125x_set_log_level(int level)
+{
+        if (level > 5) {
+                return (-EINVAL);
+        }
+
+        if (level < 0) {
+                return (-EINVAL);
+        }
+        g_log_level = level;
+
+        return (0);
+}
+EXPORT_SYMBOL_GPL(ads125x_set_log_level);
 
 
 
@@ -846,7 +871,14 @@ int ads125x_multi_ring_set_size(struct ads125x_multi * multi, unsigned int size)
                 return (-EBUSY);
         }
         ppbuf_term(&multi->buff);
+        ADS125X_INF("multi set buffer size: setting new size to 2x%d samples\n",
+                        size);
         ret = ppbuf_init(&multi->buff, size);
+
+        if (ret) {
+                ADS125X_ERR("multi set buffer size: failed, err: %d\n",
+                                ret);
+        }
 
         return (ret);
 }
@@ -872,12 +904,15 @@ ssize_t ads125x_multi_ring_get_items(struct ads125x_multi * multi,
         unsigned int            transferred;
 
         if ((count % (sizeof(struct ads125x_sample)) != 0)) {
+                ADS125X_ERR("size of user buffer not aligned with sample" 
+                                "structure\n");
                 return (-EINVAL);
         }
         transfer_pending = count / sizeof(struct ads125x_sample);
 
         if (transfer_pending > ppbuf_size(&multi->buff)) {
                 transfer_pending = ppbuf_size(&multi->buff);
+                ADS125X_WRN("requested samples more than size of buffers\n");
         }
         transfer = transfer_pending;
 
@@ -892,6 +927,8 @@ ssize_t ads125x_multi_ring_get_items(struct ads125x_multi * multi,
                 sample = ppbuf_get_item(&multi->buff);
 
                 if (copy_to_user(sample_buff++, sample, sizeof(*sample))) {
+                        ADS125X_ERR("copy_to_user() failed\n");
+
                         return (-EINVAL);
                 }
                 transferred++;
@@ -908,6 +945,8 @@ ssize_t ads125x_multi_ring_get_items(struct ads125x_multi * multi,
                 ret = ppbuf_wait_complete_timed(&multi->buff, timeout);
 
                 if (ret) {
+                        ADS125X_WRN("timeout for buffer complete\n");
+
                         return (-ETIMEDOUT);
                 }
 
@@ -918,6 +957,8 @@ ssize_t ads125x_multi_ring_get_items(struct ads125x_multi * multi,
                         sample = ppbuf_get_item(&multi->buff);
 
                         if (copy_to_user(sample_buff++, sample, sizeof(*sample))) {
+                                ADS125X_ERR("copy_to_user() failed\n");
+
                                 return (-EINVAL);
                         }
                         transferred++;
@@ -934,6 +975,7 @@ int ads125x_buffer_enable(struct ads125x_chip * chip)
 {
         int                     ret;
 
+        ADS125X_INF("enabling continuous mode\n");
         init_completion(&chip->completion);
 
         ret = chip_set_mode_bl(chip, ADS125X_MODE_CONTINUOUS);
@@ -953,6 +995,7 @@ int ads125x_buffer_disable(struct ads125x_chip * chip)
 {
         int                     ret;
 
+        ADS125X_INF("disabling continuous mode\n");
         INIT_COMPLETION(chip->completion);
         wait_for_completion_timeout(&chip->completion, HZ);
     

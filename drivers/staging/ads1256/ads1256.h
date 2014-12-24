@@ -15,21 +15,45 @@
 #include <linux/spinlock.h>
 #include <misc/ads1256.h>
 
-/*--  Configuration  --------------------------------------------------------*/
-#define ADS125X_NAME                            "ads1256"
-#define ADS125X_CONFIG_SUPPORTED_CHIPS          4
-
-
 #define ADS125X_ERR(msg, ...)                                           \
-        printk(KERN_ERR ADS125X_NAME " error: " msg, ## __VA_ARGS__)
+        do {                                                            \
+                if (g_log_level > 0) {                                  \
+                        printk(KERN_ERR ADS125X_NAME " error: " msg,    \
+                                ## __VA_ARGS__);                        \
+                }                                                       \
+        } while (0)
+
 #define ADS125X_INF(msg, ...)                                           \
-        printk(KERN_INFO ADS125X_NAME " info: " msg, ## __VA_ARGS__)
+        do {                                                            \
+                if (g_log_level > 3) {                                  \
+                        printk(KERN_INFO ADS125X_NAME " info: " msg,    \
+                                ## __VA_ARGS__);                        \
+                }                                                       \
+        } while (0)
+
 #define ADS125X_NOT(msg, ...)                                           \
-        printk(KERN_NOTICE  ADS125X_NAME ": " msg, ## __VA_ARGS__)
+        do {                                                            \
+                if (g_log_level > 2) {                                  \
+                        printk(KERN_NOTICE  ADS125X_NAME ": " msg,      \
+                                ## __VA_ARGS__);                        \
+                }                                                       \
+        } while (0)
+
 #define ADS125X_WRN(msg, ...)                                           \
-        printk(KERN_WARNING ADS125X_NAME " warning: " msg, ## __VA_ARGS__)
+        do {                                                            \
+                if (g_log_level > 1) {                                  \
+                        printk(KERN_WARNING ADS125X_NAME " warning: " msg,\
+                                ## __VA_ARGS__);                        \
+                }                                                       \
+        } while (0)
+
 #define ADS125X_DBG(msg, ...)                                           \
-        printk(KERN_DEFAULT ADS125X_NAME " debug: " msg, ## __VA_ARGS__)
+        do {                                                            \
+                if (g_log_level > 4) {                                  \
+                        printk(KERN_DEFAULT ADS125X_NAME " debug: " msg,\
+                                ## __VA_ARGS__);                        \
+                }                                                       \
+        } while (0)
 
 struct ads125x_chip {
         struct ads125x_multi *  multi;
@@ -43,14 +67,6 @@ struct ads125x_chip {
         int                     id;
         int                     cs_gpio;
         int                     drdy_gpio;
-};
-
-struct ads125x_sample {
-        uint32_t                raw[ADS125X_CONFIG_SUPPORTED_CHIPS];
-        union ads125x_sample_info {
-                uint32_t                completed_chip;
-                uint32_t                sequence;
-        }                       info;
 };
 
 struct ads125x_ring {
@@ -85,7 +101,7 @@ struct ads125x_multi {
         bool                    is_bus_locked;
 };
 
-
+extern int g_log_level;
 
 int ads125x_probe_trigger(struct ads125x_chip * chip);
 int ads125x_init_multi(struct ads125x_multi * multi, struct spi_device * spi,
@@ -97,6 +113,8 @@ void ads125x_term_multi(struct ads125x_multi * multi);
 int ads125x_term_chip(struct ads125x_chip * chip);
 void ads125x_term_hw(struct ads125x_chip * chip);
 void ads125x_remove_trigger(struct ads125x_chip * chip);
+
+int ads125x_set_log_level(int level);
 
 static inline 
 struct spi_device * multi_to_spi(const struct ads125x_multi * multi)
@@ -140,6 +158,7 @@ ssize_t ads125x_multi_ring_get_items(struct ads125x_multi * multi,
                 char * buf, size_t count, unsigned long timeout);
 int ads125x_buffer_enable(struct ads125x_chip * chip);
 int ads125x_buffer_disable(struct ads125x_chip * chip);
+
 
 #endif /* ADS1256_H_ */
 
