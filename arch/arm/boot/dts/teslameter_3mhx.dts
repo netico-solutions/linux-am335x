@@ -10,7 +10,7 @@
 #include "am33xx.dtsi"
 
 / {
-	model = "Teslameter 3MHx";
+	model = "Variscite AM335x SOM";
 	compatible = "ti,var-som-am33", "ti,am33xx";
 
 	cpus {
@@ -21,7 +21,7 @@
 
 	memory {
 		device_type = "memory";
-		reg = <0x80000000 0x20000000>; /* 512 MB */
+		reg = <0x80000000 0x10000000>; /* 256 MB */
 	};
 
 	am33xx_pinmux: pinmux@44e10800 {
@@ -113,68 +113,6 @@
 			>;
 		};
 
-        /*
-         *  Digital interface inputs
-         *  - DIGIN1 / pin 50
-         *  - DIGIN2 / pin 48
-         *  - DIGIN3 / pin 46
-         *  - DIGIN4 / pin 44
-         */
-        dig_intf_in: dig_intf_in {
-            pinctrl-single,pins = <
-                0x58 (PIN_INPUT_PULLDOWN | MUX_MODE7)      /* gpmc_a6.gpio1_22 */
-                0x50 (PIN_INPUT_PULLDOWN | MUX_MODE7)	   /* gpmc_a4.gpio1_20 */
-                0x48 (PIN_INPUT_PULLDOWN | MUX_MODE7)	   /* gpmc_a2.gpio1_18 */
-                0x40 (PIN_INPUT_PULLDOWN | MUX_MODE7)      /* gpmc_a0.gpio1_16 */
-            >;
-        };
-
-        /*
-         * Digital interface output sense
-         * - RELIN1 / pin 70
-         * - RELIN2 / pin 66 <- FIXME: CONFLICT with MMC0
-         * - RELIN3 / pin 56
-         * - RELIN4 / pin 54
-         */
-        dig_intf_sense: dig_intf_sense {
-            pinctrl-single,pins = <
-                0x130 (PIN_INPUT_PULLDOWN | MUX_MODE7)     /* mii1_rxclk.gpio3_10 */ 
-                /* conflicted pin  */                      /* mii1_rxd3.gpio2_18 */
-                0x68 (PIN_INPUT_PULLDOWN | MUX_MODE7)      /* gpmc_a10.gpio1_26 */
-                0x60 (PIN_INPUT_PULLDOWN | MUX_MODE7)      /* gpmc_a8.gpio1_24 */
-            >;
-        };
-        
-        /*
-         * Digital interface outputs
-         * - REL1 / pin 55
-         * - REL2 / pin 59
-         * - REL3 / pin 61
-         * - REL4 / pin 63 <- FIXME: CONFLICT with NAND
-         */
-        dig_intf_out: dig_intf_out {
-            pinctrl-single,pins = <
-                0x5c (PIN_OUTPUT | MUX_MODE7)              /* gpmc_a7.gpio1_23 */
-                0x64 (PIN_OUTPUT | MUX_MODE7)              /* gpmc_a9.gpio1_25 */
-                0x6c (PIN_OUTPUT | MUX_MODE7)              /* gpmc_a11.gpio1_27 */
-                /* conflicted pin */                       /* gpmc_wait0.gpio0_30 */
-            >;
-        };
-
-        /*
-         * General IO
-         * - IO1 / pin 83 <- FIXME: CONFLICT with NAND
-         * - IO2 / pin 81 <- FIXME: CONFLICT with NAND
-         * - IO3 / pin 79 <- FIXME: CONFLICT with NAND
-         * - IO4 / pin 77 <- FIXME: CONFLICT with NAND
-         */
-        
-        /*
-         * UART - Config USB
-         * - UART5_TX / pin 92 <- FIXME: CONFLICT with MDIO
-         * - UART5_RX / pin 94 <- FIXME: CONFLICT with MDIO
-         */
-
 		cpsw_default: cpsw_default {
 			pinctrl-single,pins = <
 				/* Slave 1 */
@@ -187,6 +125,22 @@
 				0x140 (PIN_INPUT_PULLDOWN | MUX_MODE1)     /* mii1_rxd0.rmii1_rxd0 */
 				0x144 (PIN_INPUT_PULLDOWN | MUX_MODE0)     /* rmii1_refclk.rmii1_refclk */
 				0x138 (PIN_INPUT_PULLUP | MUX_MODE7)       /* mii1_rxd2.gpio2_19 */
+
+				/* Slave 2 */
+				0x40 (PIN_OUTPUT | MUX_MODE2)	           /* gpmc_a0.rgmii2_tctl */
+				0x44 (PIN_INPUT_PULLDOWN | MUX_MODE2)	   /* gpmc_a1.rgmii2_rctl */
+				0x48 (PIN_OUTPUT | MUX_MODE2)	           /* gpmc_a2.rgmii2_td3 */
+				0x4c (PIN_OUTPUT | MUX_MODE2)              /* gpmc_a3.rgmii2_td2 */
+				0x50 (PIN_OUTPUT | MUX_MODE2)              /* gpmc_a4.rgmii2_td1 */
+				0x54 (PIN_OUTPUT | MUX_MODE2)              /* gpmc_a5.rgmii2_td0 */
+				0x58 (PIN_OUTPUT | MUX_MODE2)              /* gpmc_a6.rgmii2_tclk */
+				0x5c (PIN_INPUT_PULLDOWN | MUX_MODE2)      /* gpmc_a7.rgmii2_rclk */
+				0x60 (PIN_INPUT_PULLDOWN | MUX_MODE2)      /* gpmc_a8.rgmii2_rd3 */
+				0x64 (PIN_INPUT_PULLDOWN | MUX_MODE2)      /* gpmc_a9.rgmii2_rd2 */
+				0x68 (PIN_INPUT_PULLDOWN | MUX_MODE2)      /* gpmc_a10.rgmii2_rd1 */
+				0x6c (PIN_INPUT_PULLDOWN | MUX_MODE2)      /* gpmc_a11.rgmii2_rd0 */
+				0x108 (PIN_INPUT_PULLDOWN | MUX_MODE1)     /* mii1_col.rmii2_refclk */
+				0x130 (PIN_INPUT_PULLUP | MUX_MODE7)       /* mii1_rxclk.gpio3_10 */
 			>;
 		};
 
@@ -202,6 +156,20 @@
 				0x140 (PIN_INPUT_PULLDOWN | MUX_MODE7)
 				0x144 (PIN_INPUT_PULLDOWN | MUX_MODE7)
 				0x138 (PIN_INPUT_PULLUP | MUX_MODE7)       /* mii1_rxd2.gpio2_19 */
+
+				/* Slave 2 reset value */
+				0x40 (PIN_INPUT_PULLDOWN | MUX_MODE7) 
+				0x44 (PIN_INPUT_PULLDOWN | MUX_MODE7)
+				0x48 (PIN_INPUT_PULLDOWN | MUX_MODE7)
+				0x4c (PIN_INPUT_PULLDOWN | MUX_MODE7)
+				0x50 (PIN_INPUT_PULLDOWN | MUX_MODE7)
+				0x54 (PIN_INPUT_PULLDOWN | MUX_MODE7)
+				0x58 (PIN_INPUT_PULLDOWN | MUX_MODE7)
+				0x5c (PIN_INPUT_PULLDOWN | MUX_MODE7)
+				0x60 (PIN_INPUT_PULLDOWN | MUX_MODE7)
+				0x64 (PIN_INPUT_PULLDOWN | MUX_MODE7)
+				0x68 (PIN_INPUT_PULLDOWN | MUX_MODE7)
+				0x6c (PIN_INPUT_PULLDOWN | MUX_MODE7)
 			>;
 		};
 
@@ -336,7 +304,7 @@
 			>;
 		};
 
-		/* FIXME: remove thi: ctw6120 irq GPIO. */
+		/* ctw6120 irq GPIO. */
 		ctw6120_pins: pinmux_ctw6120_pins {
 			pinctrl-single,pins = <
 				0x154 0x27	/* spi0_d0.gpio0_3, INPUT | MODE7 */
@@ -400,6 +368,23 @@
 			pinctrl-1 = <&uart5_pins_sleep>;
 			*/
 			status = "okay";
+		};
+
+		i2c0: i2c@44e0b000 {
+			pinctrl-names = "default";
+			pinctrl-0 = <&i2c0_pins>;
+
+			status = "okay";
+			clock-frequency = <400000>;
+			/* Set OPP50 (0.95V) for VDD core */
+			sleep-sequence = /bits/ 8 <
+				0x02 0x2d 0x25 0x1f /* Set VDD2 to 0.95V */
+			>;
+
+			/* Set OPP100 (1.10V) for VDD core */
+			wake-sequence = /bits/ 8 <
+				0x02 0x2d 0x25 0x2b /* Set VDD2 to 1.1V */
+			>;
 		};
 
 		musb: usb@47400000 {
@@ -506,7 +491,7 @@
 				ti,nand-ecc-opt= "bch8";
 				ti,elm-id = <&elm>;
 				/* MTD partition table */
-		        /* All SPL-* partitions are sized to minimal length
+		                /* All SPL-* partitions are sized to minimal length
 				 * which can be independently programmable. For
 				 * NAND flash this is equal to size of erase-block */
 				#address-cells = <1>;
@@ -671,7 +656,7 @@
 		 * in newer kerenls, we seem to miss interrupts when
 		 * working with edge irqs, so revert back to level irqs.
 		 */
-		/* platform-quirks = <1>; */
+		 /* platform-quirks = <1>; */
 
 		/* if a 12xx card is there, configure the clock to
 		   WL12XX_REFCLOCK_38_XTAL */
@@ -697,6 +682,14 @@
 	pinctrl-names = "default";
 	pinctrl-0 = <&dcan0_default>;
 	status = "okay";
+};
+
+&spi0 {
+    status = "okay";
+};
+
+&spi1 {
+    status = "okay";
 };
 
 &mcasp0 {
@@ -770,7 +763,7 @@
 			regulator-always-on;
 		};
 
-        vpll_reg: regulator@7 {
+		vpll_reg: regulator@7 {
 			regulator-always-on;
 		};
 
