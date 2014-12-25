@@ -868,7 +868,7 @@ int ads125x_multi_ring_set_size(struct ads125x_multi * multi, unsigned int size)
 {
         int                     ret;
 
-        if (!multi->is_bus_locked) {
+        if (multi->is_bus_locked) {
                 return (-EBUSY);
         }
         ppbuf_term(&multi->buff);
