@@ -14,9 +14,9 @@
 #define ADS125X_SET_MUX                                                 \
         _IOW(ADS125X_MAGIC, 100, struct ads125x_mux)
 #define ADS125X_SET_BUF_SIZE                                            \
-        _IOW(ADS125X_MAGIC, 101, int)
-#define ADS125X_SET_LOG_LEVEL                                           \
         _IOW(ADS125X_MAGIC, 102, int)
+#define ADS125X_SET_LOG_LEVEL                                           \
+        _IOW(ADS125X_MAGIC, 104, int)
 #define ADS125X_SELF_CALIBRATE                  _IO(ADS125X_MAGIC, 102)
 #define ADS125X_START_SAMPLING                  _IO(ADS125X_MAGIC, 115)
 #define ADS125X_STOP_SAMPLING                   _IO(ADS125X_MAGIC, 116)
