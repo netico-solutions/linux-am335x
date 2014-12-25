@@ -547,7 +547,6 @@ static void __exit ads1256_exit(void)
                 if (chip) {
                         ADS125X_INF("chip %d: cleaning up\n", chip_id);
                         ads125x_term_hw(chip);
-                        ads125x_remove_trigger(chip);
                         ads125x_term_chip(chip);
                         kfree(chip);
                         multi->chip[chip_id] = NULL;
