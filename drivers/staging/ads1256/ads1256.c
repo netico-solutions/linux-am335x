@@ -306,6 +306,8 @@ static long ads1256_ioctl(struct file * fd, unsigned int cmd, unsigned long arg)
                                         sizeof(struct ads125x_mux));
 
                         if (ret) {
+                                ADS125X_ERR("failed to get user arguments, err: %d\n",
+                                                ret);
                                 return (-EACCES);
                         }
                         ret = ads1256_all_set_mux(multi, mux.positive, 
@@ -316,15 +318,20 @@ static long ads1256_ioctl(struct file * fd, unsigned int cmd, unsigned long arg)
                 case ADS125X_SET_BUF_SIZE: {
                         int     buff_size;
 
-                        ADS125X_DBG("setting buffer sizei, cmd: %d, arg: %lu\n",
+                        ADS125X_DBG("setting buffer size, cmd: %d, arg: %lu\n",
                                         cmd, arg);
 
                         ret = copy_from_user(&buff_size, 
                                         (const void __user *)arg, sizeof(int));
 
                         if (ret) {
+                                ADS125X_ERR("failed to get user arguments, err: %d\n",
+                                                ret);
+
                                 return (-EACCES);
                         }
+                        ADS125X_DBG("multi_ring_set_size(multi: %p, size: %d\n",
+                                        multi, buff_size);
                         ret = ads125x_multi_ring_set_size(multi, buff_size);
 
                         return (ret);
@@ -339,6 +346,8 @@ static long ads1256_ioctl(struct file * fd, unsigned int cmd, unsigned long arg)
                                         (const void __user *)arg, sizeof(int));
 
                         if (ret) {
+                                ADS125X_ERR("failed to get user arguments, err: %d\n",
+                                                ret);
                                 return (-EACCES);
                         }
                         ret = ads125x_set_log_level(log_level);
