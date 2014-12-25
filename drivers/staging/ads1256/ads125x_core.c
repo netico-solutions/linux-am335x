@@ -770,7 +770,10 @@ EXPORT_SYMBOL_GPL(ads125x_term_hw);
  */
 void ads125x_remove_trigger(struct ads125x_chip * chip)
 {
-        disable_irq(gpio_to_irq(chip->drdy_gpio));
+        INIT_COMPLETION(chip->completion);
+        wait_for_completion_timeout(&chip->completion, HZ);
+    
+        disable_irq_nosync(gpio_to_irq(chip->drdy_gpio));
         free_irq(gpio_to_irq(chip->drdy_gpio), chip);
 }
 EXPORT_SYMBOL_GPL(ads125x_remove_trigger);
@@ -977,16 +980,10 @@ int ads125x_buffer_enable(struct ads125x_chip * chip)
         int                     ret;
 
         ADS125X_INF("enabling continuous mode\n");
-        init_completion(&chip->completion);
 
         ret = chip_set_mode_bl(chip, ADS125X_MODE_CONTINUOUS);
 
-        if (ret) {
-                return (ret);
-        }
-        enable_irq(gpio_to_irq(chip->drdy_gpio));
-
-        return (0);
+        return (ret);
 }
 EXPORT_SYMBOL_GPL(ads125x_buffer_enable);
 
@@ -997,10 +994,7 @@ int ads125x_buffer_disable(struct ads125x_chip * chip)
         int                     ret;
 
         ADS125X_INF("disabling continuous mode\n");
-        INIT_COMPLETION(chip->completion);
-        wait_for_completion_timeout(&chip->completion, HZ);
-    
-        disable_irq_nosync(gpio_to_irq(chip->drdy_gpio));
+
         ret = chip_set_mode_bl(chip, ADS125X_MODE_IDLE);
 
         return (ret);

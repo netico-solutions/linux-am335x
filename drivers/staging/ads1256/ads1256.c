@@ -172,17 +172,31 @@ static int ads1256_all_buffer_enable(struct ads125x_multi * multi)
         enabled_id = 0;
 
         for (chip_id = 0; chip_id < ADS125X_CONFIG_SUPPORTED_CHIPS; chip_id++) {
+                struct ads125x_chip * chip;                
+                
                 if (!ads125x_is_chip_enabled(multi, chip_id)) {
                         ADS125X_NOT("chip %d: buffer_enable() skipping\n",
                                         chip_id);
                         continue;
                 }
+                chip = multi->chip[chip_id];
                 ADS125X_NOT("chip %d: buffer_enable()\n", chip_id);
-                ret = ads125x_buffer_enable(multi->chip[chip_id]);
+                ret = ads125x_buffer_enable(chip);
 
                 if (ret) {
                         ADS125X_ERR("chip %d: buffer_enable() failed, err: %d\n",
                                         chip_id, ret);
+
+                        goto fail_buffer_enable;
+                }
+                ADS125X_NOT("chip %d: probe_trigger(chip = %p)\n", chip_id, 
+                                chip);
+                ret = ads125x_probe_trigger(chip);
+
+                if (ret) {
+                        ADS125X_ERR("chip %d: failed to probe trigger, err: %d\n", 
+                                        chip_id, ret);
+                        ads125x_buffer_disable(chip);
 
                         goto fail_buffer_enable;
                 }
@@ -191,10 +205,14 @@ static int ads1256_all_buffer_enable(struct ads125x_multi * multi)
         return (0);
 fail_buffer_enable:
         for (chip_id = 0; chip_id < ADS125X_CONFIG_SUPPORTED_CHIPS; chip_id++) {
+                struct ads125x_chip * chip;
+
                 if (!(enabled_id & (0x1u << chip_id))) {
                         continue;
                 }
-                ads125x_buffer_disable(multi->chip[chip_id]);
+                chip = multi->chip[chip_id];
+                ads125x_remove_trigger(chip);
+                ads125x_buffer_disable(chip);
         }
         ads125x_multi_unlock(multi);
 
@@ -213,13 +231,18 @@ static int ads1256_all_buffer_disable(struct ads125x_multi * multi)
         }
 
         for (chip_id = 0; chip_id < ADS125X_CONFIG_SUPPORTED_CHIPS; chip_id++) {
+                struct ads125x_chip * chip;
+
                 if (!ads125x_is_chip_enabled(multi, chip_id)) {
                         ADS125X_NOT("chip %d: buffer_disable() skipping\n",
                                         chip_id);
                         continue;
                 }
+                chip = multi->chip[chip_id];
+                ADS125X_NOT("chip %d: remove_trigger()\n", chip_id);
+                ads125x_remove_trigger(chip);
                 ADS125X_NOT("chip %d: buffer_disable()\n", chip_id);
-                ret = ads125x_buffer_disable(multi->chip[chip_id]);
+                ret = ads125x_buffer_disable(chip);
 
                 if (ret) {
                         ADS125X_ERR("chip %d: buffer_disable() failed, err: %d\n",
@@ -466,25 +489,12 @@ static int __init ads1256_init(void)
                         
                         goto fail_for_chip;
                 }
-                ADS125X_DBG("chip %d: probe_trigger(chip = %p)\n", chip_id, 
-                                chip);
-                ret = ads125x_probe_trigger(chip);
-
-                if (ret) {
-                        ADS125X_ERR("chip %d: failed to init trigger, err: %d\n", 
-                                        chip_id, ret);
-                        ads125x_term_chip(chip);
-                        kfree(chip);
-
-                        goto fail_for_chip;
-                }
                 ADS125X_DBG("chip %d: init_hw(chip = %p)\n", chip_id, chip);
                 ret = ads125x_init_hw(chip);
                 
                 if (ret) {
                         ADS125X_ERR("chip %d: failed to init hardware, err: %d\n", 
                                         chip_id, ret);
-                        ads125x_remove_trigger(chip);
                         ads125x_term_chip(chip);
                         kfree(chip);
                 }
@@ -505,7 +515,6 @@ fail_for_chip:
                 if (chip) {
                         ADS125X_NOT("chip %d: cleaning up\n", chip_id);
                         ads125x_term_hw(chip);
-                        ads125x_remove_trigger(chip);
                         ads125x_term_chip(chip);
                         kfree(chip);
                         multi->chip[chip_id] = NULL;
