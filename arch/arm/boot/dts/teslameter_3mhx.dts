@@ -430,7 +430,7 @@
 			tlv320aic3106: tlv320aic3106@1b {
 				compatible = "ti,tlv320aic3106";
 				reg = <0x1b>;
-				status = "okay";
+				/* status = "okay"; */
 
 				/* Regulators */
 				AVDD-supply = <&vaux2_reg>;
@@ -697,7 +697,7 @@
 		pinctrl-0 = <&mcasp0_pins>;
 		pinctrl-1 = <&mcasp0_sleep_pins>;
 
-		status = "okay";
+		/* status = "okay";*/
 
 		op-mode = <0>;          /* MCASP_IIS_MODE */
 		tdm-slots = <2>;
@@ -819,7 +819,7 @@
 };
 
 &tscadc {
-	status = "okay";
+	/* status = "okay"; */
 	tsc {
 		ti,wires = <4>;
 		ti,x-plate-resistance = <200>;

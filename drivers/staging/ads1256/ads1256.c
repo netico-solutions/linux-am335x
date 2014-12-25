@@ -301,6 +301,7 @@ static long ads1256_ioctl(struct file * fd, unsigned int cmd, unsigned long arg)
                 case ADS125X_SET_MUX: {
                         struct ads125x_mux mux;
                         
+                        ADS125X_DBG("setting mux\n");
                         ret = copy_from_user(&mux, (const void __user *)arg, 
                                         sizeof(struct ads125x_mux));
 
@@ -315,6 +316,9 @@ static long ads1256_ioctl(struct file * fd, unsigned int cmd, unsigned long arg)
                 case ADS125X_SET_BUF_SIZE: {
                         int     buff_size;
 
+                        ADS125X_DBG("setting buffer sizei, cmd: %d, arg: %lu\n",
+                                        cmd, arg);
+
                         ret = copy_from_user(&buff_size, 
                                         (const void __user *)arg, sizeof(int));
 
@@ -328,9 +332,11 @@ static long ads1256_ioctl(struct file * fd, unsigned int cmd, unsigned long arg)
                 case ADS125X_SET_LOG_LEVEL : {
                         int     log_level;
 
+                        ADS125X_DBG("setting log level, cmd: %d, arg: %lu\n",
+                                        cmd, arg);
+
                         ret = copy_from_user(&log_level, 
                                         (const void __user *)arg, sizeof(int));
-
 
                         if (ret) {
                                 return (-EACCES);

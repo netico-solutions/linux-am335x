@@ -614,8 +614,9 @@ int ads125x_init_multi(struct ads125x_multi * multi, struct spi_device * spi,
 
                 goto fail_spi_setup; 
         }
-        ADS125X_INF("multi: setup buffers, size: 2x%d samples\n", 
-                        ADS125X_CONFIG_BUFFER_SIZE);
+        ADS125X_INF("multi: setup buffers, size: 2x%d samples, %d bytes\n", 
+                        ADS125X_CONFIG_BUFFER_SIZE, 
+                        ADS125X_CONFIG_BUFFER_SIZE * sizeof(struct ads125x_sample));
         ret = ppbuf_init(&multi->buff, ADS125X_CONFIG_BUFFER_SIZE);
 
         if (ret) {
