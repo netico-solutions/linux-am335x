@@ -158,6 +158,34 @@ static int ads1256_all_set_mux(struct ads125x_multi * multi, uint32_t positive,
 
 
 
+static int ads1256_all_set_data_rate(struct ads125x_multi * multi, int data_rate)
+{
+        int                     ret;
+        unsigned int            chip_id;
+
+        for (chip_id = 0; chip_id < ADS125X_CONFIG_SUPPORTED_CHIPS; chip_id++) {
+                if (!ads125x_is_chip_enabled(multi, chip_id)) {
+                        ADS125X_NOT("chip %d: set_data_rate() skipping\n",
+                                        chip_id);
+                        continue;
+                }
+                ADS125X_INF("chip %d: set_data_rate() = %d\n", chip_id, 
+                        data_rate);
+                ret = ads125x_set_data_rate(multi->chip[chip_id], data_rate);
+
+                if (ret) {
+                        ADS125X_ERR("chip %d: set_data_rate() = %d failed, err: %d\n",
+                                        chip_id, data_rate, ret);
+
+                        return (ret);
+                }
+        }
+
+        return (0);
+}
+
+
+
 static int ads1256_all_buffer_enable(struct ads125x_multi * multi)
 {
         int                     ret;
@@ -377,6 +405,21 @@ static long ads1256_ioctl(struct file * fd, unsigned int cmd, unsigned long arg)
 
                         return (ret);
                 }
+                case ADS125X_SET_DATA_RATE : {
+                        int     data_rate;
+
+                        ret = copy_from_user(&data_rate, 
+                                        (const void __user *)arg, sizeof(int));
+
+                        if (ret) {
+                                ADS125X_ERR("failed to set data rate, err: %d\n",
+                                                ret);
+                                return (-EACCES);
+                        }
+                        ret = ads1256_all_set_data_rate(multi, data_rate);
+
+                        return (ret);
+                }
                 case ADS125X_SELF_CALIBRATE: {
 
                         return (ads1256_all_self_calibrate(multi));
@@ -404,7 +447,7 @@ static ssize_t ads1256_read(struct file * fd, char __user * buff, size_t count,
         struct ads125x_multi *  multi = fd->private_data;
         ssize_t                 ret;
 
-        ret = ads125x_multi_ring_get_items(multi, buff, count, HZ);
+        ret = ads125x_multi_ring_get_items(multi, buff, count, 10 * HZ);
 
         if (ret > 0) {
                 *off += ret;

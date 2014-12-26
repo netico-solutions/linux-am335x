@@ -61,9 +61,7 @@ struct ads125x_chip {
         struct completion       completion;
         struct spi_transfer     irq_transfer;
         struct spi_message      irq_message;
-        uint8_t                 irq_data[16]
-                ____cacheline_aligned;
-        bool                    is_irq_enabled;
+        uint8_t                 irq_data[16] ____cacheline_aligned;
         int                     id;
         int                     cs_gpio;
         int                     drdy_gpio;
@@ -86,6 +84,7 @@ struct ads125x_ppbuf {
 };
 
 struct ads125x_sched {
+        unsigned int            enabled;
         unsigned int            ready;
         unsigned int            fired;
         bool                    is_busy;
@@ -158,7 +157,7 @@ ssize_t ads125x_multi_ring_get_items(struct ads125x_multi * multi,
                 char * buf, size_t count, unsigned long timeout);
 int ads125x_buffer_enable(struct ads125x_chip * chip);
 int ads125x_buffer_disable(struct ads125x_chip * chip);
-
+int ads125x_set_data_rate(struct ads125x_chip * chip, int data_rate);
 
 #endif /* ADS1256_H_ */
 

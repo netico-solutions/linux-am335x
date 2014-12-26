@@ -17,7 +17,9 @@
         _IOW(ADS125X_MAGIC, 102, int)
 #define ADS125X_SET_LOG_LEVEL                                           \
         _IOW(ADS125X_MAGIC, 104, int)
-#define ADS125X_SELF_CALIBRATE                  _IO(ADS125X_MAGIC, 102)
+#define ADS125X_SET_DATA_RATE                                           \
+        _IOW(ADS125X_MAGIC, 106, int)
+#define ADS125X_SELF_CALIBRATE                  _IO(ADS125X_MAGIC, 101)
 #define ADS125X_START_SAMPLING                  _IO(ADS125X_MAGIC, 115)
 #define ADS125X_STOP_SAMPLING                   _IO(ADS125X_MAGIC, 116)
 
@@ -26,6 +28,10 @@
 #define ADS125X_NAME                            "ads1256"
 #define ADS125X_CONFIG_SUPPORTED_CHIPS          4
 #define ADS125X_CONFIG_BUFFER_SIZE              1024
+
+
+#define ADS125X_DRATE_10                        (0x23)
+#define ADS125X_DRATE_100                       (0x82)
 
 struct ads125x_mux {
         int                     positive;

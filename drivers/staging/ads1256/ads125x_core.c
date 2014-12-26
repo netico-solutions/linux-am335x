@@ -17,7 +17,6 @@
 
 #include "ads1256.h"
 
-#define CONFIG_FIFO_SIZE                1024
 
 #define ADS125X_REG_STATUS                      0x00u
 #define ADS125X_REG_MUX                         0x01u
@@ -55,7 +54,6 @@
 #define ADS125X_GPIO_DIR_Pos                    (4)
 #define ADS125X_GPIO_DIR_Msk                    (0xfu << ADS125X_GPIO_DIR_Pos)
 
-#define ADS125X_DRATE_10                        (0x23)
 
 #define ADS125X_CHANNEL_0                       0x00u
 #define ADS125X_CHANNEL_1                       0x01u
@@ -121,6 +119,7 @@ static int ring_init(struct ads125x_ring * ring, unsigned int elements)
         if (!ring->buff) {
                 return (-ENOMEM);
         }
+        ADS125X_DBG("ring mask: %d\n", ring->mask);
 
         return (0);
 }
@@ -273,10 +272,17 @@ static struct ads125x_sample * ppbuf_current_item_i(struct ads125x_ppbuf * buff)
  */
 static void ppbuf_put_item_i(struct ads125x_ppbuf * buff)
 {
+        unsigned int            occupied;
+
         ring_put_item(buff->producer);
+        occupied = ring_occupied(buff->producer);
+        ADS125X_DBG("put item: %d, completion level: %d\n", occupied,
+                        buff->completion_level);
 
         if (buff->completion_level) {
-                if (buff->completion_level >= ring_occupied(buff->producer)) {
+                if (buff->completion_level <= occupied) {
+                        ADS125X_DBG("finished requested size: %d\n",
+                                        occupied );
                         buff->completion_level = 0;
                         ppbuf_swap_i(buff);
                         complete(&buff->completion);
@@ -312,27 +318,43 @@ static int ppbuf_wait_complete_timed(struct ads125x_ppbuf * buff,
 /*--  SPI scheduler  --------------------------------------------------------*/
 
 
-static void spi_scheduler_init(struct ads125x_multi * multi)
+static void spi_scheduler_init(struct ads125x_sched * sched)
 {
-        multi->sched.ready   = 0;
-        multi->sched.fired   = 0;
-        multi->sched.is_busy = false;
+        sched->enabled = 0;
+        sched->ready   = 0;
+        sched->fired   = 0;
+        sched->is_busy = false;
 }
 
 
 
-static unsigned int spi_reschedule_i(struct ads125x_multi * multi)
+static void spi_schedule_add_i(struct ads125x_sched * sched, unsigned int id)
 {
-        unsigned int            ready;
+        sched->enabled |= (0x1u << id);
+}
+
+
+
+static void spi_schedule_remove_i(struct ads125x_sched * sched, unsigned int id)
+{
+        sched->enabled &= ~(0x1u << id);
+}
+
+
+
+static unsigned int spi_reschedule_i(struct ads125x_sched * sched)
+{
         unsigned int            ret = 0;
 
-        if (!multi->sched.is_busy) {
-                ready = multi->sched.ready & ~multi->sched.fired;
+        if (!sched->is_busy) {
+                unsigned int    ready;
+
+                ready = sched->enabled & sched->ready & ~sched->fired;
                 ret   = ffs(ready);
 
                 if (ret) {
-                        multi->sched.fired  |= 0x1u << (ret - 1u);
-                        multi->sched.is_busy = true;
+                        sched->fired  |= 0x1u << (ret - 1u);
+                        sched->is_busy = true;
                 }
         }
 
@@ -341,35 +363,35 @@ static unsigned int spi_reschedule_i(struct ads125x_multi * multi)
 
 
 
-static unsigned int spi_schedule_i(struct ads125x_chip * chip)
+static unsigned int spi_schedule_ready_i(struct ads125x_sched * sched, 
+                unsigned int id)
 {
-        struct ads125x_multi *  multi = chip->multi;
         unsigned int            chip_id_no;
 
-        multi->sched.ready |= 0x1u << chip->id;
-        chip_id_no          = spi_reschedule_i(multi);
+        sched->ready |= 0x1u << id;
+        chip_id_no    = spi_reschedule_i(sched);
 
         return (chip_id_no);
 }
 
 
 
-static unsigned int spi_schedule_block_i(struct ads125x_chip * chip)
+static unsigned int spi_schedule_block_i(struct ads125x_sched * sched, 
+                unsigned int id)
 {
-        struct ads125x_multi *  multi = chip->multi;
         unsigned int            chip_id_no;
 
-        multi->sched.ready  &= ~(0x1u << chip->id);
-        multi->sched.is_busy = false;
-        chip_id_no           = spi_reschedule_i(multi);
+        sched->ready  &= ~(0x1u << id);
+        sched->is_busy = false;
+        chip_id_no     = spi_reschedule_i(sched);
 
         return (chip_id_no);
 }
 
 
-static void spi_scheduler_restart(struct ads125x_multi * multi)
+static void spi_schedule_restart(struct ads125x_sched * sched)
 {
-        multi->sched.fired = 0;
+        sched->fired = 0;
 }
 
 /*--  SPI  ------------------------------------------------------------------*/
@@ -400,10 +422,9 @@ static irqreturn_t chip_trigger_ready_handler(int irq, void * p)
         unsigned long           flags;
         unsigned int            chip_id_no;
 
-        ADS125X_DBG("irq id: %d\n", chip->id);
         disable_irq_nosync(irq);
         spin_lock_irqsave(&multi->lock, flags);
-        chip_id_no = spi_schedule_i(chip);
+        chip_id_no = spi_schedule_ready_i(&multi->sched, chip->id);
         spin_unlock_irqrestore(&multi->lock, flags);
 
         if (chip_id_no) {
@@ -450,14 +471,20 @@ static void chip_read_data_finish_al(void * arg)
         current_sample->raw[chip->id]        = (chip->irq_data[2] << 16) | 
                                                (chip->irq_data[1] <<  8) |
                                                (chip->irq_data[0] <<  0);
+        ADS125X_DBG("completed chip: %d: %u|%u|%u|%u\n", 
+                        current_sample->info.completed_chip,
+                        current_sample->raw[3],
+                        current_sample->raw[2],
+                        current_sample->raw[1],
+                        current_sample->raw[0]);
 
         if (current_sample->info.completed_chip == multi->enabled_chips) {
                 /* At this point all relevant chips were sampled */
                 ppbuf_put_item_i(buff);
                 ppbuf_current_item_i(buff)->info.completed_chip = 0;
-                spi_scheduler_restart(multi);
+                spi_schedule_restart(&multi->sched);
         }
-        chip_id_no = spi_schedule_block_i(chip);
+        chip_id_no = spi_schedule_block_i(&multi->sched, chip->id);
         spin_unlock_irqrestore(&multi->lock, flags);
 
         if (chip_id_no) {
@@ -572,6 +599,7 @@ int ads125x_probe_trigger(struct ads125x_chip * chip)
 {
         int                     ret;
         char                    label[64];
+        unsigned long           flags;
 
         ret = gpio_to_irq(chip->drdy_gpio);
 
@@ -592,6 +620,9 @@ int ads125x_probe_trigger(struct ads125x_chip * chip)
 
                 goto fail_irq_request;
         }
+        spin_lock_irqsave(&chip->multi->lock, flags);
+        spi_schedule_add_i(&chip->multi->sched, chip->id);
+        spin_unlock_irqrestore(&chip->multi->lock, flags);
 
         return (0);
 fail_irq_request:
@@ -611,7 +642,7 @@ int ads125x_init_multi(struct ads125x_multi * multi, struct spi_device * spi,
 
         spi->bits_per_word  = 8;
         spi->mode           = SPI_MODE_1;
-        spi->max_speed_hz   = 1000000ul;
+        spi->max_speed_hz   = 4000000ul;
         ADS125X_INF("multi: setup spi\n");
         ret = spi_setup(spi);
 
@@ -634,7 +665,7 @@ int ads125x_init_multi(struct ads125x_multi * multi, struct spi_device * spi,
         multi->is_bus_locked = false;
         multi->enabled_chips = enabled_chips_mask;
         ADS125X_INF("initializing SPI scheduler\n");
-        spi_scheduler_init(multi);
+        spi_scheduler_init(&multi->sched);
 
         return (ret);
 fail_fifo_setup:
@@ -660,7 +691,6 @@ int ads125x_init_chip(struct ads125x_chip * chip, struct ads125x_multi * multi,
         chip->id             = id;
         chip->cs_gpio        = cs_gpio;
         chip->drdy_gpio      = drdy_gpio;
-        chip->is_irq_enabled = false;
         sprintf(label, ADS125X_NAME "-%d-drdy", chip->id);
         ret = gpio_request_one(chip->drdy_gpio, GPIOF_DIR_IN, label);
 
@@ -782,8 +812,13 @@ EXPORT_SYMBOL_GPL(ads125x_term_hw);
  */
 void ads125x_remove_trigger(struct ads125x_chip * chip)
 {
+        unsigned long           flags;
+
+        spin_lock_irqsave(&chip->multi->lock, flags);
+        spi_schedule_remove_i(&chip->multi->sched, chip->id);
         INIT_COMPLETION(chip->completion);
-        wait_for_completion_timeout(&chip->completion, HZ);
+        spin_unlock_irqrestore(&chip->multi->lock, flags);
+        wait_for_completion_timeout(&chip->completion, 1 * HZ);
     
         disable_irq_nosync(gpio_to_irq(chip->drdy_gpio));
         free_irq(gpio_to_irq(chip->drdy_gpio), chip);
@@ -936,7 +971,10 @@ ssize_t ads125x_multi_ring_get_items(struct ads125x_multi * multi,
         if (transfer > ppbuf_consumer_occupied(&multi->buff)) {
                 transfer = ppbuf_consumer_occupied(&multi->buff);
         }
-        ADS125X_DBG("occupied: %d\n", transfer);
+        ADS125X_DBG("ring state: head %d, tail %d, free %d\n", 
+                        multi->buff.consumer->head,
+                        multi->buff.consumer->tail,
+                        multi->buff.consumer->free);
 
         for (transferred = 0, transfer_count = 0; 
                         transfer_count < transfer; transfer_count++) {
@@ -954,7 +992,7 @@ ssize_t ads125x_multi_ring_get_items(struct ads125x_multi * multi,
         transfer_pending -= transferred;
 
         if (transfer_pending) {
-                unsigned int    ret;
+                unsigned int    ret = 0;
                 unsigned long   flags;
 
                 ADS125X_DBG("data still pending, transfer_pending: %d\n",
@@ -962,13 +1000,14 @@ ssize_t ads125x_multi_ring_get_items(struct ads125x_multi * multi,
                 spin_lock_irqsave(&multi->lock, flags);
                 ppbuf_set_completion_i(&multi->buff, transfer_pending);
                 spin_unlock_irqrestore(&multi->lock, flags);
-                ret = ppbuf_wait_complete_timed(&multi->buff, timeout);
+                ppbuf_wait_complete_timed(&multi->buff, timeout);
 
                 if (ret) {
                         ADS125X_WRN("timeout for buffer complete\n");
 
                         return (-ETIMEDOUT);
                 }
+                ADS125X_DBG("unblocked, continuing\n");
 
                 for (transfer_count = 0; transfer_count < transfer_pending; 
                                 transfer_count++) {
@@ -1017,6 +1056,21 @@ int ads125x_buffer_disable(struct ads125x_chip * chip)
 }
 EXPORT_SYMBOL_GPL(ads125x_buffer_disable);
 
+
+
+int ads125x_set_data_rate(struct ads125x_chip * chip, int data_rate)
+{
+        int                     ret;
+
+        if (chip->multi->is_bus_locked) {
+                return (-EBUSY);
+        }
+
+        ret = ads125x_write_reg(chip, ADS125X_REG_DRATE, data_rate);
+
+        return (ret);
+}
+EXPORT_SYMBOL_GPL(ads125x_set_data_rate);
 
 
 MODULE_AUTHOR("Nenad Radulovic <nenad.b.radulovic@gmail.com>");
