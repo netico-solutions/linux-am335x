@@ -96,7 +96,7 @@ static int chip_exchange_blocking(struct ads125x_chip * chip,
 static irqreturn_t chip_trigger_ready_handler(int irq, void * p);
 static int chip_read_data_begin_al(struct ads125x_chip * chip);
 static void chip_read_data_finish_al(void * arg);
-static int chip_set_mode_bl(struct ads125x_chip * chip, uint32_t mode);
+static int chip_set_mode(struct ads125x_chip * chip, uint32_t mode);
 
 int g_log_level = 5;
 EXPORT_SYMBOL_GPL(g_log_level);
@@ -305,7 +305,7 @@ static void ppbuf_set_completion_i(struct ads125x_ppbuf * buff,
 static int ppbuf_wait_complete_timed(struct ads125x_ppbuf * buff, 
                 unsigned long timeout)
 {
-        return (wait_for_completion_timeout(&buff->completion, timeout));
+        return (wait_for_completion_timeout(&buff->completion, timeout) ? 0 : -ETIMEDOUT);
 }
 
 
@@ -400,6 +400,7 @@ static irqreturn_t chip_trigger_ready_handler(int irq, void * p)
         unsigned long           flags;
         unsigned int            chip_id_no;
 
+        ADS125X_DBG("irq id: %d\n", chip->id);
         disable_irq_nosync(irq);
         spin_lock_irqsave(&multi->lock, flags);
         chip_id_no = spi_schedule_i(chip);
@@ -467,7 +468,7 @@ static void chip_read_data_finish_al(void * arg)
 
 
 
-static int chip_set_mode_bl(struct ads125x_chip * chip, uint32_t mode)
+static int chip_set_mode(struct ads125x_chip * chip, uint32_t mode)
 {
         struct spi_transfer     transfer[2];
         struct spi_message      message;
@@ -512,6 +513,7 @@ static int ads125x_write_reg(struct ads125x_chip * chip, uint32_t reg,
         if (chip->multi->is_bus_locked) {
                 return (-EBUSY);;
         }
+        ADS125X_DBG("chip %d: WR to %d = %d\n", chip->id, reg, val);
         memset(&transfer, 0, sizeof(transfer));
         transfer.tx_buf = tx_buf;
         transfer.len    = 3;     /* Add for 1st and 2nd command byte */
@@ -534,6 +536,7 @@ static int ads125x_read_reg(struct ads125x_chip * chip, uint32_t reg,
         struct spi_transfer     transfer[2];
         struct spi_message      message;
         uint8_t                 tx_buf[8];
+        int                     ret;
 
         if (chip->multi->is_bus_locked) {
                 return (-EBUSY);
@@ -550,7 +553,10 @@ static int ads125x_read_reg(struct ads125x_chip * chip, uint32_t reg,
         spi_message_add_tail(&transfer[0], &message);
         spi_message_add_tail(&transfer[1], &message);
 
-        return (chip_exchange_blocking(chip, &message));
+        ret = chip_exchange_blocking(chip, &message);
+        ADS125X_DBG("chip %d: RD from %d is %u\n", chip->id, reg, *val);
+
+        return (ret);
 }
 
 /*--  PUBLIC METHODS  --------------------------------------------------------*/
@@ -604,8 +610,8 @@ int ads125x_init_multi(struct ads125x_multi * multi, struct spi_device * spi,
         int                     ret;
 
         spi->bits_per_word  = 8;
-        spi->mode           = SPI_MODE_0;
-        spi->max_speed_hz   = 10000000ul;
+        spi->mode           = SPI_MODE_1;
+        spi->max_speed_hz   = 1000000ul;
         ADS125X_INF("multi: setup spi\n");
         ret = spi_setup(spi);
 
@@ -697,6 +703,12 @@ int ads125x_init_hw(struct ads125x_chip * chip)
 {
         int                     ret;
 
+        ADS125X_INF("chip %d: stop continuous mode\n", chip->id);
+        ret = chip_set_mode(chip, ADS125X_MODE_IDLE);
+
+        if (ret) {
+                goto fail_write;
+        }
         ADS125X_INF("chip %d: enable autocalibration\n", chip->id);
         ret = ads125x_write_reg(chip, ADS125X_REG_STATUS, ADS125X_STATUS_ACAL);
 
@@ -913,6 +925,7 @@ ssize_t ads125x_multi_ring_get_items(struct ads125x_multi * multi,
                 return (-EINVAL);
         }
         transfer_pending = count / sizeof(struct ads125x_sample);
+        ADS125X_DBG("transfer_pending: %d\n", transfer_pending);
 
         if (transfer_pending > ppbuf_size(&multi->buff)) {
                 transfer_pending = ppbuf_size(&multi->buff);
@@ -923,6 +936,7 @@ ssize_t ads125x_multi_ring_get_items(struct ads125x_multi * multi,
         if (transfer > ppbuf_consumer_occupied(&multi->buff)) {
                 transfer = ppbuf_consumer_occupied(&multi->buff);
         }
+        ADS125X_DBG("occupied: %d\n", transfer);
 
         for (transferred = 0, transfer_count = 0; 
                         transfer_count < transfer; transfer_count++) {
@@ -943,6 +957,8 @@ ssize_t ads125x_multi_ring_get_items(struct ads125x_multi * multi,
                 unsigned int    ret;
                 unsigned long   flags;
 
+                ADS125X_DBG("data still pending, transfer_pending: %d\n",
+                                transfer_pending);
                 spin_lock_irqsave(&multi->lock, flags);
                 ppbuf_set_completion_i(&multi->buff, transfer_pending);
                 spin_unlock_irqrestore(&multi->lock, flags);
@@ -981,7 +997,7 @@ int ads125x_buffer_enable(struct ads125x_chip * chip)
 
         ADS125X_INF("enabling continuous mode\n");
 
-        ret = chip_set_mode_bl(chip, ADS125X_MODE_CONTINUOUS);
+        ret = chip_set_mode(chip, ADS125X_MODE_CONTINUOUS);
 
         return (ret);
 }
@@ -995,7 +1011,7 @@ int ads125x_buffer_disable(struct ads125x_chip * chip)
 
         ADS125X_INF("disabling continuous mode\n");
 
-        ret = chip_set_mode_bl(chip, ADS125X_MODE_IDLE);
+        ret = chip_set_mode(chip, ADS125X_MODE_IDLE);
 
         return (ret);
 }
