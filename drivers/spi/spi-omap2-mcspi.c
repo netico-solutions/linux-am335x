@@ -1298,7 +1298,6 @@ static int omap2_mcspi_probe(struct platform_device *pdev)
 		dev_dbg(&pdev->dev, "master allocation failed\n");
 		return -ENOMEM;
 	}
-        printk(KERN_ERR " DEBUG: omap2_mcspi_probe()");
 
 	/* the spi->mode bits understood by this driver: */
 	master->mode_bits = SPI_CPOL | SPI_CPHA | SPI_CS_HIGH;
