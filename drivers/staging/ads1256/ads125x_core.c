@@ -770,6 +770,10 @@ EXPORT_SYMBOL_GPL(ads125x_init_hw);
 
 
 
+/*
+ * ads125x_term_multi()
+ * @multi: multi device
+ */
 void ads125x_term_multi(struct ads125x_multi * multi)
 {
         if (multi->spi) {
@@ -798,6 +802,10 @@ EXPORT_SYMBOL_GPL(ads125x_term_chip);
 
 
 
+/**
+ * ads125x_term_hw()
+ * @chip: chip device
+ */
 void ads125x_term_hw(struct ads125x_chip * chip)
 {
         /* TODO: stop and terminate HW here */
@@ -827,6 +835,12 @@ EXPORT_SYMBOL_GPL(ads125x_remove_trigger);
 
 
 
+/**
+ * ads125x_set_log_level()
+ * @level: log level 0-5
+ *
+ * Returns 0 on success, an error code otherwise.
+ */
 int ads125x_set_log_level(int level)
 {
         if (level > 5) {
@@ -886,6 +900,12 @@ EXPORT_SYMBOL_GPL(ads125x_set_mux);
 
 
 
+/**
+ * ads125x_multi_lock()
+ * @multi: multi device
+ *
+ * Returns 0 on success, an error code otherwise.
+ */
 int ads125x_multi_lock(struct ads125x_multi* multi)
 {
         if (multi->is_bus_locked) {
@@ -900,6 +920,12 @@ EXPORT_SYMBOL_GPL(ads125x_multi_lock);
 
 
 
+/**
+ * ads125x_multi_unlock()
+ * @multi: multi device
+ *
+ * Returns 0 on success, an error code otherwise.
+ */
 int ads125x_multi_unlock(struct ads125x_multi * multi)
 {
         if (!multi->is_bus_locked) {
@@ -914,6 +940,13 @@ EXPORT_SYMBOL_GPL(ads125x_multi_unlock);
 
 
 
+/**
+ * ads125x_multi_ring_get_size()
+ * @multi: multi device
+ * @size: size of buffers, must be power of 2 
+ *
+ * Returns 0 on success, an error code otherwise.
+ */
 int ads125x_multi_ring_set_size(struct ads125x_multi * multi, unsigned int size)
 {
         int                     ret;
@@ -937,6 +970,12 @@ EXPORT_SYMBOL_GPL(ads125x_multi_ring_set_size);
 
 
 
+/**
+ * ads125x_multi_ring_get_size()
+ * @multi: multi device
+ *
+ * Returns the buffer size.
+ */
 size_t ads125x_multi_ring_get_size(struct ads125x_multi * multi)
 {
         return (ppbuf_size(&multi->buff));
@@ -944,7 +983,15 @@ size_t ads125x_multi_ring_get_size(struct ads125x_multi * multi)
 EXPORT_SYMBOL_GPL(ads125x_multi_ring_get_size);
 
 
-
+/**
+ * ads125x_multi_ring_get_items()
+ * @multi: multi device
+ * @buff: buffer to store items
+ * @count: number of items to put into the buffer
+ * @timeout: timeout in jiffies to wait for buffer completion
+ *
+ * Returns the number of returned elements, negative error otherwise.
+ */
 ssize_t ads125x_multi_ring_get_items(struct ads125x_multi * multi,
                 char * buff, size_t count, unsigned long timeout)
 {
@@ -1030,6 +1077,12 @@ EXPORT_SYMBOL_GPL(ads125x_multi_ring_get_items);
         
 
 
+/**
+ * ads125x_buffer_enable()
+ * @chip: chip device
+ *
+ * Returns 0 on success, an error code otherwise.
+ */
 int ads125x_buffer_enable(struct ads125x_chip * chip)
 {
         int                     ret;
@@ -1044,6 +1097,12 @@ EXPORT_SYMBOL_GPL(ads125x_buffer_enable);
 
 
 
+/**
+ * ads125x_buffer_disable()
+ * @chip: chip device
+ *
+ * Returns 0 on success, an error code otherwise.
+ */
 int ads125x_buffer_disable(struct ads125x_chip * chip)
 {
         int                     ret;
@@ -1058,6 +1117,13 @@ EXPORT_SYMBOL_GPL(ads125x_buffer_disable);
 
 
 
+/**
+ * ads125x_set_data_rate()
+ * @chip: chip device
+ * @data_rate: see defined macros in IOCTL interface header
+ *
+ * Returns 0 on success, an error code otherwise.
+ */
 int ads125x_set_data_rate(struct ads125x_chip * chip, int data_rate)
 {
         int                     ret;
