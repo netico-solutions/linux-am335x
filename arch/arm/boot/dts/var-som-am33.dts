@@ -127,20 +127,7 @@
 				0x138 (PIN_INPUT_PULLUP | MUX_MODE7)       /* mii1_rxd2.gpio2_19 */
 
 				/* Slave 2 */
-				0x40 (PIN_OUTPUT | MUX_MODE2)	           /* gpmc_a0.rgmii2_tctl */
-				0x44 (PIN_INPUT_PULLDOWN | MUX_MODE2)	   /* gpmc_a1.rgmii2_rctl */
-				0x48 (PIN_OUTPUT | MUX_MODE2)	           /* gpmc_a2.rgmii2_td3 */
-				0x4c (PIN_OUTPUT | MUX_MODE2)              /* gpmc_a3.rgmii2_td2 */
-				0x50 (PIN_OUTPUT | MUX_MODE2)              /* gpmc_a4.rgmii2_td1 */
-				0x54 (PIN_OUTPUT | MUX_MODE2)              /* gpmc_a5.rgmii2_td0 */
-				0x58 (PIN_OUTPUT | MUX_MODE2)              /* gpmc_a6.rgmii2_tclk */
-				0x5c (PIN_INPUT_PULLDOWN | MUX_MODE2)      /* gpmc_a7.rgmii2_rclk */
-				0x60 (PIN_INPUT_PULLDOWN | MUX_MODE2)      /* gpmc_a8.rgmii2_rd3 */
-				0x64 (PIN_INPUT_PULLDOWN | MUX_MODE2)      /* gpmc_a9.rgmii2_rd2 */
-				0x68 (PIN_INPUT_PULLDOWN | MUX_MODE2)      /* gpmc_a10.rgmii2_rd1 */
-				0x6c (PIN_INPUT_PULLDOWN | MUX_MODE2)      /* gpmc_a11.rgmii2_rd0 */
-				0x108 (PIN_INPUT_PULLDOWN | MUX_MODE1)     /* mii1_col.rmii2_refclk */
-				0x130 (PIN_INPUT_PULLUP | MUX_MODE7)       /* mii1_rxclk.gpio3_10 */
+                /* Slave 2 is not used */
 			>;
 		};
 
@@ -158,18 +145,7 @@
 				0x138 (PIN_INPUT_PULLUP | MUX_MODE7)       /* mii1_rxd2.gpio2_19 */
 
 				/* Slave 2 reset value */
-				0x40 (PIN_INPUT_PULLDOWN | MUX_MODE7) 
-				0x44 (PIN_INPUT_PULLDOWN | MUX_MODE7)
-				0x48 (PIN_INPUT_PULLDOWN | MUX_MODE7)
-				0x4c (PIN_INPUT_PULLDOWN | MUX_MODE7)
-				0x50 (PIN_INPUT_PULLDOWN | MUX_MODE7)
-				0x54 (PIN_INPUT_PULLDOWN | MUX_MODE7)
-				0x58 (PIN_INPUT_PULLDOWN | MUX_MODE7)
-				0x5c (PIN_INPUT_PULLDOWN | MUX_MODE7)
-				0x60 (PIN_INPUT_PULLDOWN | MUX_MODE7)
-				0x64 (PIN_INPUT_PULLDOWN | MUX_MODE7)
-				0x68 (PIN_INPUT_PULLDOWN | MUX_MODE7)
-				0x6c (PIN_INPUT_PULLDOWN | MUX_MODE7)
+                /* Slave 2 is not used */
 			>;
 		};
 
@@ -304,18 +280,7 @@
 			>;
 		};
 
-		/* ctw6120 irq GPIO. */
-		ctw6120_pins: pinmux_ctw6120_pins {
-			pinctrl-single,pins = <
-				0x154 0x27	/* spi0_d0.gpio0_3, INPUT | MODE7 */
-			>;
-		};
-		dcan0_default: dcan0_default_pins {
-			pinctrl-single,pins = <
-				0x11c (PIN_OUTPUT_PULLDOWN | MUX_MODE1)	 /* AM33XX_CONTROL_PADCONF_MII1_TXD3_OFFSET			0x091C */
-				0x120 (PIN_INPUT_PULLUP | MUX_MODE1)      /* AM33XX_CONTROL_PADCONF_MII1_TXD2_OFFSET			0x0920 */
-			>;
-		};
+        /* dcan0 is not used */
 	};
 
 	ocp {
@@ -439,17 +404,7 @@
 				DVDD-supply = <&vbat>;
 			};
 
-			ctw6120_tsc@38 {
-				compatible = "var,ctw6120-tsc";
-				pinctrl-names = "default";
-				pinctrl-0 = <&ctw6120_pins>;
-				reg = <0x38>;
-				interrupt-parent = <&gpio0>;
-				interrupts = <3>;
-
-				x-size = <800>;
-				y-size = <480>;
-			};
+            /* ctw6120 is not used */
 		};
 
 		elm: elm@48080000 {
@@ -678,11 +633,7 @@
 
 #include "tps65910.dtsi"
 
-&dcan0 {
-	pinctrl-names = "default";
-	pinctrl-0 = <&dcan0_default>;
-	status = "okay";
-};
+/* dcan0 is not used */
 
 &mcasp0 {
 		pinctrl-names = "default", "sleep";
@@ -787,7 +738,7 @@
 	pinctrl-names = "default", "sleep";
 	pinctrl-0 = <&cpsw_default>;
 	pinctrl-1 = <&cpsw_sleep>;
-	dual_emac;
+	slaves = <1>;
 };
 
 &davinci_mdio {
@@ -810,19 +761,7 @@
 	rmii-clock-ext;
 };
 
-&tscadc {
-	status = "okay";
-	tsc {
-		ti,wires = <4>;
-		ti,x-plate-resistance = <200>;
-		ti,coordinate-readouts = <5>;
-		ti,wire-config = <0x00 0x21 0x12 0x33>;
-	};
-
-	adc {
-		ti,adc-channels = <4 5 6 7>;
-	};
-};
+/* tsadc is not used */
 
 &mmc1 {
 	status = "okay";
