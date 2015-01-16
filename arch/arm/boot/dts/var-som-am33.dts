@@ -32,6 +32,7 @@
             &wlan_pins 
             &buzzer_pins 
             &user_led_pins
+            &din_pins
             &data_bus_pins
         >;
 
@@ -48,15 +49,24 @@
             >;
         };
 
+        din_pins: pinmux_din_pins {
+            pinctrl-single,pins = <
+                0x40 (PIN_INPUT | MUX_MODE7)            /* gpmc_a0.gpio1_16 (DIN4) */
+                0x48 (PIN_INPUT | MUX_MODE7)            /* gpmc_a2.gpio1_18 (DIN3) */
+                0x50 (PIN_INPUT | MUX_MODE7)            /* gpmc_a4.gpio1_20 (DIN2) */
+                0x58 (PIN_INPUT | MUX_MODE7)            /* gpmc_a6.gpio1_22 (DIN1) */
+            >;
+        };
+
         uart4_pins_default: pinmux_uart4_pins_default {
-            pinctrl-single.pins = <
+            pinctrl-single,pins = <
                 0x11c (PIN_INPUT | MUX_MODE3)           /* gmii1_txd3.uart4_rxd */
                 0x120 (PIN_OUTPUT | MUX_MODE3)          /* gmii1_txd2.uart4_txd */
             >;
         };
 
         uart4_pins_sleep: pinmux_uart4_pins_sleep {
-            pinctrl-single.pins = <
+            pinctrl-single,pins = <
                 0x11c (PIN_INPUT_PULLUP | MUX_MODE7)    /* gmii1_txd3.uart4_rxd */
                 0x120 (PIN_INPUT_PULLUP | MUX_MODE7)    /* gmii1_txd2.uart4_txd */
             >;
