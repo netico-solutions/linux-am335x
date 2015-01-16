@@ -35,6 +35,7 @@
             &din_pins
             &data_bus_pins
             &touch_pins
+            &lcd_gpio_pins
         >;
 
         buzzer_pins: pinmux_buzzer_pins {
@@ -96,6 +97,13 @@
             pinctrl-single,pins = <
                 0x44 (PIN_INPUT | MUX_MODE7)            /* gpmc_a1.gpio1_17 (CT_INT) */
                 0x88 (PIN_OUTPUT | MUX_MODE7)           /* gpmc_csn3.gpio2_0 (CT_WAKE) */
+            >;
+        };
+
+        lcd_gpio_pins: pinmux_lcd_gpio_pins {
+            pinctrl-single,pins = <
+                0x54 (PIN_OUTPUT | MUX_MODE7)           /* gpmc_a5.gpio1_21 (BL_CTRL) */
+                0x4c (PIN_OUTPUT | MUX_MODE7)           /* gpmc_a3.gpio1_19 (DISP_SHDN) */
             >;
         };
 
