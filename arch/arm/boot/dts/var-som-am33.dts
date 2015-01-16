@@ -34,6 +34,13 @@
             >;
         };
 
+        uart4_pins: pinmux_uart4_pins {
+            pinctrl-single.pins = <
+                0x11c (PIN_INPUT | MUX_MODE3)           /* gmii1_txd3.uart4_rxd */
+                0x120 (PIN_OUTPUT | MUX_MODE3)          /* gmii1_txd2.uart4_txd */
+            >;
+        };
+
 		i2c0_pins: pinmux_i2c0_pins {
 			pinctrl-single,pins = <
 				0x188 (PIN_INPUT_PULLUP | MUX_MODE0)	/* i2c0_sda.i2c0_sda */
