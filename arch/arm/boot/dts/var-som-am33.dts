@@ -34,6 +34,7 @@
             &user_led_pins
             &din_pins
             &data_bus_pins
+            &touch_pins
         >;
 
         buzzer_pins: pinmux_buzzer_pins {
@@ -88,6 +89,13 @@
                 0x164 (PIN_OUTPUT | MUX_MODE4)          /* ecap0_in_pwm0_out.spi1_sck (SPI1_SCK) */
                 0x108 (PIN_OUTPUT | MUX_MODE7)          /* gmii1_col.gpio3_0 (P20) */
                 0x3c (PIN_OUTPUT | MUX_MODE7)           /* gpmc_ad15.gpio1_15 (P21) */
+            >;
+        };
+
+        touch_pins: pinmux_touch_pins {
+            pinctrl-single,pins = <
+                0x44 (PIN_INPUT | MUX_MODE7)            /* gpmc_a1.gpio1_17 (CT_INT) */
+                0x88 (PIN_OUTPUT | MUX_MODE7)           /* gpmc_csn3.gpio2_0 (CT_WAKE) */
             >;
         };
 
