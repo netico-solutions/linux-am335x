@@ -34,6 +34,13 @@
             >;
         };
 
+        user_led_pins: pinmux_user_led_pins {
+            pinctrl-single,pins = <
+                0x34 (PIN_OUTPUT | MUX_MODE7)           /* gpmc_ad13.gpio1_13 (LED_GRN) */
+                0x30 (PIN_OUTPUT | MUX_MODE7)           /* gpmc_ad12.gpio1_12 (LED_RED) */
+            >;
+        };
+
         uart4_pins_default: pinmux_uart4_pins_default {
             pinctrl-single.pins = <
                 0x11c (PIN_INPUT | MUX_MODE3)           /* gmii1_txd3.uart4_rxd */
