@@ -482,6 +482,10 @@
             /* ctw6120 is not used */
 		};
 
+        spi1: spi@481a0000 {
+            status = "okay";
+        };
+
 		elm: elm@48080000 {
 			status = "okay";
 		};
