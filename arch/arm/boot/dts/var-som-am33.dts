@@ -28,6 +28,12 @@
 		pinctrl-names = "default";
 		pinctrl-0 = <&clkout1_pin &mmc1_pins &wlan_pins>;
 
+        buzzer_pins: pinmux_buzzer_pins {
+            pinctrl-single,pins = <
+                0x1e4 (PIN_OUTPUT | MUX_MODE7) /* emu0.gpio3_7 */
+            >;
+        };
+
 		i2c0_pins: pinmux_i2c0_pins {
 			pinctrl-single,pins = <
 				0x188 (PIN_INPUT_PULLUP | MUX_MODE0)	/* i2c0_sda.i2c0_sda */
