@@ -74,6 +74,7 @@
 
         data_bus_pins: pinmux_data_bus_pins {
             pinctrl-single,pins = <
+                0x160 (PIN_INPUT | MUX_MODE7)           /* spi0_cs1.gpio0_6 (EXT_TR) */
                 0x6c (PIN_INPUT | MUX_MODE7)            /* gpmc_a11.gpio1_27 (DRDY-Z) */
                 0x64 (PIN_INPUT | MUX_MODE7)            /* gpmc_a9.gpio1_15 (DRDY-Y)  */
                 0x5c (PIN_INPUT | MUX_MODE7)            /* gpmc_a7.gpio1_23 (DRDY-X)  */
