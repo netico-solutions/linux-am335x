@@ -26,7 +26,14 @@
 
 	am33xx_pinmux: pinmux@44e10800 {
 		pinctrl-names = "default";
-		pinctrl-0 = <&clkout1_pin &mmc1_pins &wlan_pins>;
+		pinctrl-0 = <
+            &clkout1_pin 
+            &mmc1_pins 
+            &wlan_pins 
+            &buzzer_pins 
+            &user_led_pins
+            &data_bus_pins
+        >;
 
         buzzer_pins: pinmux_buzzer_pins {
             pinctrl-single,pins = <
