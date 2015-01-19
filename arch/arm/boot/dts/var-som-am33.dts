@@ -77,14 +77,8 @@
         data_bus_pins: pinmux_data_bus_pins {
             pinctrl-single,pins = <
                 0x160 (PIN_INPUT | MUX_MODE7)           /* spi0_cs1.gpio0_6 (EXT_TR) */
-                0x6c (PIN_INPUT | MUX_MODE7)            /* gpmc_a11.gpio1_27 (DRDY-Z) */
-                0x64 (PIN_INPUT | MUX_MODE7)            /* gpmc_a9.gpio1_15 (DRDY-Y)  */
-                0x5c (PIN_INPUT | MUX_MODE7)            /* gpmc_a7.gpio1_23 (DRDY-X)  */
-                0x8c (PIN_INPUT | MUX_MODE7)            /* gpmc_clk.gpio2_1 (DRDY-TP) */   
-                0x38 (PIN_OUTPUT | MUX_MODE7)           /* gpmc_ad14.gpio1_14 (SPI1_CS3) */
-                0x154 (PIN_OUTPUT | MUX_MODE7)          /* spi0_d0.gpio0_3 (SPI1_CS2) */
-                0x150 (PIN_OUTPUT | MUX_MODE7)          /* spi0_sclk.gpio0_2 (SPI1_CS1) */
-                0x19c (PIN_OUTPUT | MUX_MODE7)          /* mcasp0_ahclkr.gpio3_17 (SPI1_CS0) */
+                0x5c (PIN_INPUT | MUX_MODE7)            /* gpmc_a7.gpio1_23 (NOTIFY)  */
+                0x19c (PIN_OUTPUT | MUX_MODE4)          /* mcasp0_ahclkr.spi1_cs0 (SPI1_CS0) */
                 0x168 (PIN_OUTPUT | MUX_MODE4)          /* uart0_ctsn.spi1_d0 (SPI1_SDO) */
                 0x16c (PIN_INPUT | MUX_MODE4)           /* uart0_rtsn.spi1_d1 (SPI1_SDI) */
                 0x164 (PIN_OUTPUT | MUX_MODE4)          /* ecap0_in_pwm0_out.spi1_sck (SPI1_SCK) */
