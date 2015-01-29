@@ -478,6 +478,7 @@
 
         spi1: spi@481a0000 {
             status = "okay";
+            ti,pindir-d0-out-d1-in;
         };
 
 		elm: elm@48080000 {
